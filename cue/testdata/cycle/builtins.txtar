@@ -134,8 +134,6 @@ issue3633: final: {
 	#s: matchN(1, [matchN(1, [{a!: _}])])
 }
 -- cycle.cue --
-import "encoding/yaml"
-
 noCycle: t1: {
 	_s
 	_s: {
@@ -169,6 +167,9 @@ issue3649: cycle: t1: {
 		a: matchN(1, [#c])
 	}
 }
+-- yamlcycle.cue --
+import "encoding/yaml"
+
 yamlNoCycle: {
 	// the validator is invoked recursively and also unifies with a concrete
 	// value. This should nonetheless not result in a cycle error.
@@ -189,97 +190,118 @@ selfCycle: t2: {
 	c: matchN(1, [{d: c}])
 	c: {}
 }
-// TODO: fix hang
-// selfCycle: yamlVal: t1: {
-// 	x: y: yaml.Validate(x)
-// 	x: y: "{}"
-// }
-// selfCycle: yamlVal: t1: {
-// 	x: y: yaml.Validate(x)
-// 	x: y: "{}"
-// }
-// selfCycle: yamlFun: t1:{
-// 	x: y?: yaml.Validate("{}", x)
-// }
-// selfCycle: yamlFun: t2: {
-// 	z: x & __no_sharing
-// 	z: y: "{}"
-// 	x: y: yaml.Validate("{}", x)
-// }
+selfCycle: yamlVal: t1: {
+	x: y: yaml.Validate(x)
+	x: y: "{}"
+}
+selfCycle: yamlVal: t2: {
+	// Duplicating validators can cause some tricky code paths, like finalizing
+	// a node while still in the middle of validation.
+	x: y: yaml.Validate(x)
+	x: y: "{}"
+	x: y: yaml.Validate(x)
+	x: y: "{}"
+}
+selfCycle: yamlFun: t1:{
+	x: y?: yaml.Validate("{}", x)
+}
+selfCycle: yamlFun: t2: {
+	z: x & __no_sharing
+	z: y: "{}"
+	x: y: yaml.Validate("{}", x)
+}
+selfCycle: yamlValidatePartial: {
+	x: y: yaml.ValidatePartial(x)
+	x: y: "{}"
+}
+-- jsoncycle.cue --
+import "encoding/json"
+
+jsonCycle: t1: {
+	x: y: json.Validate(x)
+	x: y: "{}"
+}
+-- listmatchncycle.cue --
+import "list"
+
+listMatchN: structCycle: {
+	x: y: list.MatchN(1, x)
+	x: y: [{}]
+}
+listMatchN: ok: {
+	x: y?: list.MatchN(1, x)
+    z: x
+	z: y: [{}]
+}
 -- todo/p1 --
 issue3443.noCycle: fix hang
 -- out/evalalpha/stats --
-Leaks:  302
-Freed:  17
-Reused: 17
-Allocs: 302
+Leaks:  427
+Freed:  0
+Reused: 0
+Allocs: 427
 Retain: 0
 
-Unifications: 262
-Conjuncts:    1037
+Unifications: 368
+Conjuncts:    805
 Disjuncts:    28
 -- diff/-out/evalalpha/stats<==>+out/eval/stats --
 diff old new
 --- old
 +++ new
 @@ -1,9 +1,9 @@
--Leaks:  22
--Freed:  369
--Reused: 357
--Allocs: 34
+-Leaks:  23
+-Freed:  414
+-Reused: 402
+-Allocs: 35
 -Retain: 95
-+Leaks:  302
-+Freed:  17
-+Reused: 17
-+Allocs: 302
++Leaks:  427
++Freed:  0
++Reused: 0
++Allocs: 427
 +Retain: 0
  
--Unifications: 363
--Conjuncts:    645
--Disjuncts:    454
-+Unifications: 262
-+Conjuncts:    1037
+-Unifications: 409
+-Conjuncts:    764
+-Disjuncts:    501
++Unifications: 368
++Conjuncts:    805
 +Disjuncts:    28
 -- out/eval/stats --
-Leaks:  22
-Freed:  369
-Reused: 357
-Allocs: 34
+Leaks:  23
+Freed:  414
+Reused: 402
+Allocs: 35
 Retain: 95
 
-Unifications: 363
-Conjuncts:    645
-Disjuncts:    454
+Unifications: 409
+Conjuncts:    764
+Disjuncts:    501
 -- out/evalalpha --
 Errors:
 noCycle.t1.#x: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-    ./cycle.cue:6:7
-    ./cycle.cue:6:14
-    ./cycle.cue:7:13
+    ./cycle.cue:4:7
+    ./cycle.cue:4:14
+    ./cycle.cue:5:13
 noCycle.t1.#x.#x: structural cycle:
-    ./cycle.cue:6:7
+    ./cycle.cue:4:7
 noCycle.t1._s.#x: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-    ./cycle.cue:6:7
-    ./cycle.cue:6:14
-    ./cycle.cue:7:13
+    ./cycle.cue:4:7
+    ./cycle.cue:4:14
+    ./cycle.cue:5:13
 issue3649.cycle.t1.data.a: invalid value {b:"foo"} (does not satisfy matchN): 0 matched, expected 1:
-    ./cycle.cue:33:6
-    ./cycle.cue:30:11
-    ./cycle.cue:33:13
+    ./cycle.cue:31:6
+    ./cycle.cue:28:11
+    ./cycle.cue:31:13
 issue3649.cycle.t1.data.a.a: structural cycle:
-    ./cycle.cue:33:6
-selfCycle.t1.c: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
-    ./cycle.cue:47:5
-    ./cycle.cue:47:12
-    ./cycle.cue:48:5
-selfCycle.t1.c.d: structural cycle:
-    ./cycle.cue:47:5
-selfCycle.t2.c: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-    ./cycle.cue:53:5
-    ./cycle.cue:53:12
-    ./cycle.cue:54:5
-selfCycle.t2.c.d: structural cycle:
-    ./cycle.cue:53:5
+    ./cycle.cue:31:6
+jsonCycle.t1.x.y: invalid value "{}" (does not satisfy encoding/json.Validate): error in call to encoding/json.Validate: structural cycle:
+    ./jsoncycle.cue:4:8
+    ./jsoncycle.cue:5:8
+listMatchN.structCycle.x.y: invalid value [{}] (does not satisfy list.MatchN): number of matched elements is 0: does not satisfy 1:
+    ./listmatchncycle.cue:4:8
+    ./listmatchncycle.cue:4:20
+    ./listmatchncycle.cue:5:8
 issue3443.matchIf.#S: cannot call non-function matchIf (type struct):
     ./matchn.cue:16:7
 issue3443.cycle1.cycle.s: invalid value {n:{n:_}} (does not satisfy matchN): 0 matched, expected 1:
@@ -297,8 +319,50 @@ issue3443.cycle1.cycle.s.n.n: structural cycle:
 issue3443.cycle2.fail.#S: invalid value {n:{n:{n:_}}} (does not satisfy matchN): 0 matched, expected 1:
     ./matchn.cue:55:13
     ./matchn.cue:55:20
-issue3443.cycle2.fail.#S.n: structural cycle:
+issue3443.cycle2.fail.#S.n: invalid value {n:{n:{n:_}}} (does not satisfy matchN): 0 matched, expected 1:
     ./matchn.cue:55:13
+    ./matchn.cue:55:20
+    ./matchn.cue:55:28
+    ./matchn.cue:55:40
+issue3443.cycle2.fail.#S.n.n: invalid value {n:{n:{n:_}}} (does not satisfy matchN): 0 matched, expected 1:
+    ./matchn.cue:55:13
+    ./matchn.cue:55:20
+    ./matchn.cue:55:28
+    ./matchn.cue:55:40
+    ./matchn.cue:55:43
+issue3443.cycle2.fail.#S.n.n.n: structural cycle:
+    ./matchn.cue:55:13
+selfCycle.t1.c: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
+    ./yamlcycle.cue:14:5
+    ./yamlcycle.cue:14:12
+    ./yamlcycle.cue:15:5
+selfCycle.t1.c.d: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
+    ./yamlcycle.cue:14:5
+    ./yamlcycle.cue:14:12
+    ./yamlcycle.cue:14:20
+    ./yamlcycle.cue:15:8
+selfCycle.t1.c.d.d: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
+    ./yamlcycle.cue:14:5
+    ./yamlcycle.cue:14:12
+    ./yamlcycle.cue:14:20
+    ./yamlcycle.cue:15:8
+selfCycle.t1.c.d.d.d: structural cycle:
+    ./yamlcycle.cue:14:5
+selfCycle.yamlVal.t1.x.y: invalid value "{}" (does not satisfy encoding/yaml.Validate): error in call to encoding/yaml.Validate: structural cycle:
+    ./yamlcycle.cue:24:8
+    ./yamlcycle.cue:25:8
+selfCycle.yamlVal.t2.x.y: invalid value "{}" (does not satisfy encoding/yaml.Validate): error in call to encoding/yaml.Validate: structural cycle:
+    ./yamlcycle.cue:30:8
+    ./yamlcycle.cue:31:8
+    ./yamlcycle.cue:32:8
+    ./yamlcycle.cue:33:8
+selfCycle.yamlFun.t2.x.y: error in call to encoding/yaml.Validate: structural cycle:
+    ./yamlcycle.cue:41:8
+selfCycle.yamlFun.t2.z.y: error in call to encoding/yaml.Validate: structural cycle:
+    ./yamlcycle.cue:41:8
+selfCycle.yamlValidatePartial.x.y: invalid value "{}" (does not satisfy encoding/yaml.ValidatePartial): error in call to encoding/yaml.ValidatePartial: structural cycle:
+    ./yamlcycle.cue:44:8
+    ./yamlcycle.cue:45:8
 
 Result:
 (_|_){
@@ -311,18 +375,18 @@ Result:
         // [eval]
         #x: (_|_){
           // [eval] noCycle.t1._s.#x: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-          //     ./cycle.cue:6:7
-          //     ./cycle.cue:6:14
-          //     ./cycle.cue:7:13
+          //     ./cycle.cue:4:7
+          //     ./cycle.cue:4:14
+          //     ./cycle.cue:5:13
         }
       }
       #x: (_|_){
         // [eval] noCycle.t1.#x: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-        //     ./cycle.cue:6:7
-        //     ./cycle.cue:6:14
-        //     ./cycle.cue:7:13
+        //     ./cycle.cue:4:7
+        //     ./cycle.cue:4:14
+        //     ./cycle.cue:5:13
         // noCycle.t1.#x.#x: structural cycle:
-        //     ./cycle.cue:6:7
+        //     ./cycle.cue:4:7
       }
     }
   }
@@ -339,7 +403,7 @@ Result:
         #c: (#struct){
           b?: (string){ string }
           a?: (_){ matchN(1, (#list){
-              0: (_|_){// &[〈2;#c〉]
+              0: (_|_){// 〈2;#c〉
               }
             }) }
         }
@@ -359,9 +423,9 @@ Result:
           b?: (string){ string }
           y: (struct){
             a?: (_){ matchN(1, (#list){
-                0: (_|_){// &[{
+                0: (_|_){// {
                   //   d: 〈4;c〉
-                  // }]
+                  // }
                 }
               }) }
           }
@@ -376,11 +440,11 @@ Result:
           // [eval]
           a: (_|_){
             // [eval] issue3649.cycle.t1.data.a: invalid value {b:"foo"} (does not satisfy matchN): 0 matched, expected 1:
-            //     ./cycle.cue:33:6
-            //     ./cycle.cue:30:11
-            //     ./cycle.cue:33:13
+            //     ./cycle.cue:31:6
+            //     ./cycle.cue:28:11
+            //     ./cycle.cue:31:13
             // issue3649.cycle.t1.data.a.a: structural cycle:
-            //     ./cycle.cue:33:6
+            //     ./cycle.cue:31:6
             b: (string){ "foo" }
           }
           b: (string){ string }
@@ -388,47 +452,10 @@ Result:
         #c: (#struct){
           b: (string){ string }
           a: (_){ matchN(1, (#list){
-              0: (_|_){// &[〈2;#c〉]
+              0: (_|_){// 〈2;#c〉
               }
             }) }
         }
-      }
-    }
-  }
-  yamlNoCycle: (struct){
-    #c: (#struct){
-      b?: (string){ string }
-      a?: ((string|bytes)){ "encoding/yaml".Validate(yamlNoCycle.#c) }
-    }
-    data: (#struct){
-      a: (string){ "{a: \"b: foo\"}" }
-      b?: (string){ string }
-    }
-  }
-  selfCycle: (_|_){
-    // [eval]
-    t1: (_|_){
-      // [eval]
-      c: (_|_){
-        // [eval] selfCycle.t1.c: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
-        //     ./cycle.cue:47:5
-        //     ./cycle.cue:47:12
-        //     ./cycle.cue:48:5
-        // selfCycle.t1.c.d: structural cycle:
-        //     ./cycle.cue:47:5
-        d: (struct){
-        }
-      }
-    }
-    t2: (_|_){
-      // [eval]
-      c: (_|_){
-        // [eval] selfCycle.t2.c: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-        //     ./cycle.cue:53:5
-        //     ./cycle.cue:53:12
-        //     ./cycle.cue:54:5
-        // selfCycle.t2.c.d: structural cycle:
-        //     ./cycle.cue:53:5
       }
     }
   }
@@ -486,32 +513,74 @@ Result:
       host: (string){ "mod.test" }
     }
   }
+  jsonCycle: (_|_){
+    // [structural cycle]
+    t1: (_|_){
+      // [structural cycle]
+      x: (_|_){
+        // [structural cycle]
+        y: (_|_){
+          // [structural cycle] jsonCycle.t1.x.y: invalid value "{}" (does not satisfy encoding/json.Validate): error in call to encoding/json.Validate: structural cycle:
+          //     ./jsoncycle.cue:4:8
+          //     ./jsoncycle.cue:5:8
+        }
+      }
+    }
+  }
+  listMatchN: (_|_){
+    // [eval]
+    structCycle: (_|_){
+      // [eval]
+      x: (_|_){
+        // [eval]
+        y: (_|_){
+          // [eval] listMatchN.structCycle.x.y: invalid value [{}] (does not satisfy list.MatchN): number of matched elements is 0: does not satisfy 1:
+          //     ./listmatchncycle.cue:4:8
+          //     ./listmatchncycle.cue:4:20
+          //     ./listmatchncycle.cue:5:8
+          0: (struct){
+          }
+        }
+      }
+    }
+    ok: (struct){
+      x: (struct){
+        y?: (list){ list.MatchN(1, listMatchN.ok.x) }
+      }
+      z: (struct){
+        y: (#list){
+          0: (struct){
+          }
+        }
+      }
+    }
+  }
   issue3410: (struct){
     _s: (struct){
       #x: (_){ matchN(1, (#list){
-          0: (_|_){// &[〈2;_s〉]
+          0: (_|_){// 〈2;_s〉
           }
-          1: (_|_){// &[[
+          1: (_|_){// [
             //   ...〈3;_s〉,
-            // ]]
+            // ]
           }
         }) }
     }
     #x: (_){ matchN(1, (#list){
-        0: (_|_){// &[〈2;_s〉]
+        0: (_|_){// 〈2;_s〉
         }
-        1: (_|_){// &[[
+        1: (_|_){// [
           //   ...〈3;_s〉,
-          // ]]
+          // ]
         }
       }) }
   }
   issue3420: (struct){
     matches1: (struct){
       #S: (_){ matchN(1, (#list){
-          0: (_|_){// &[_]
+          0: (_|_){// _
           }
-          1: (_|_){// &[_|_(explicit error (_|_ literal) in source)]
+          1: (_|_){// _|_(explicit error (_|_ literal) in source)
           }
         }) }
       s: (int){ 2 }
@@ -528,9 +597,9 @@ Result:
     }
     noCycle: (struct){
       #S: (_){ matchN(1, (#list){
-          0: (_|_){// &[{
+          0: (_|_){// {
             //   n?: (〈2;#S〉 & (int|{}))
-            // }]
+            // }
           }
         }) }
       noHang: (struct){
@@ -543,25 +612,25 @@ Result:
     }
     noCycle2: (struct){
       #S: (_){ matchN(1, (#list){
-          0: (_|_){// &[{
+          0: (_|_){// {
             //   n?: (int|〈2;#S〉)
-            // }]
+            // }
           }
         }) }
     }
     cycle1: (_|_){
       // [eval]
       #S: (_){ matchN(1, (#list){
-          0: (_|_){// &[{
+          0: (_|_){// {
             //   n: 〈2;#S〉
-            // }]
+            // }
           }
         }) }
       ok: (struct){
         s: (_){ matchN(1, (#list){
-            0: (_|_){// &[{
+            0: (_|_){// {
               //   n: 〈2;#S〉
-              // }]
+              // }
             }
           }) }
       }
@@ -594,7 +663,18 @@ Result:
           // [eval] issue3443.cycle2.fail.#S: invalid value {n:{n:{n:_}}} (does not satisfy matchN): 0 matched, expected 1:
           //     ./matchn.cue:55:13
           //     ./matchn.cue:55:20
-          // issue3443.cycle2.fail.#S.n: structural cycle:
+          // issue3443.cycle2.fail.#S.n: invalid value {n:{n:{n:_}}} (does not satisfy matchN): 0 matched, expected 1:
+          //     ./matchn.cue:55:13
+          //     ./matchn.cue:55:20
+          //     ./matchn.cue:55:28
+          //     ./matchn.cue:55:40
+          // issue3443.cycle2.fail.#S.n.n: invalid value {n:{n:{n:_}}} (does not satisfy matchN): 0 matched, expected 1:
+          //     ./matchn.cue:55:13
+          //     ./matchn.cue:55:20
+          //     ./matchn.cue:55:28
+          //     ./matchn.cue:55:40
+          //     ./matchn.cue:55:43
+          // issue3443.cycle2.fail.#S.n.n.n: structural cycle:
           //     ./matchn.cue:55:13
           n: (#struct){
             n: (#struct){
@@ -612,22 +692,125 @@ Result:
         //     ./matchn.cue:63:6
         //     ./matchn.cue:62:8
         //     ./matchn.cue:63:13
+        // issue3633.final.a: field is required but not present:
+        //     ./matchn.cue:63:17
+        //     ./matchn.cue:63:29
         // issue3633.final.data: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
         //     ./matchn.cue:63:17
         //     ./matchn.cue:62:8
         //     ./matchn.cue:63:24
-        // issue3633.final.data.a: field is required but not present:
-        //     ./matchn.cue:63:17
-        //     ./matchn.cue:63:29
       }
       #s: (_){ matchN(1, (#list){
-          0: (_|_){// &[matchN(1, [
+          0: (_|_){// matchN(1, [
             //   {
             //     a!: _
             //   },
-            // ])]
+            // ])
           }
         }) }
+    }
+  }
+  yamlNoCycle: (struct){
+    #c: (#struct){
+      b?: (string){ string }
+      a?: ((string|bytes)){ "encoding/yaml".Validate(yamlNoCycle.#c) }
+    }
+    data: (#struct){
+      a: (string){ "{a: \"b: foo\"}" }
+      b?: (string){ string }
+    }
+  }
+  selfCycle: (_|_){
+    // [eval]
+    t1: (_|_){
+      // [eval]
+      c: (_|_){
+        // [eval] selfCycle.t1.c: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
+        //     ./yamlcycle.cue:14:5
+        //     ./yamlcycle.cue:14:12
+        //     ./yamlcycle.cue:15:5
+        // selfCycle.t1.c.d: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
+        //     ./yamlcycle.cue:14:5
+        //     ./yamlcycle.cue:14:12
+        //     ./yamlcycle.cue:14:20
+        //     ./yamlcycle.cue:15:8
+        // selfCycle.t1.c.d.d: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
+        //     ./yamlcycle.cue:14:5
+        //     ./yamlcycle.cue:14:12
+        //     ./yamlcycle.cue:14:20
+        //     ./yamlcycle.cue:15:8
+        // selfCycle.t1.c.d.d.d: structural cycle:
+        //     ./yamlcycle.cue:14:5
+        d: (struct){
+        }
+      }
+    }
+    t2: (struct){
+      c: (struct){
+      }
+    }
+    yamlVal: (_|_){
+      // [eval]
+      t1: (_|_){
+        // [eval]
+        x: (_|_){
+          // [eval]
+          y: (_|_){
+            // [eval] selfCycle.yamlVal.t1.x.y: invalid value "{}" (does not satisfy encoding/yaml.Validate): error in call to encoding/yaml.Validate: structural cycle:
+            //     ./yamlcycle.cue:24:8
+            //     ./yamlcycle.cue:25:8
+          }
+        }
+      }
+      t2: (_|_){
+        // [eval]
+        x: (_|_){
+          // [eval]
+          y: (_|_){
+            // [eval] selfCycle.yamlVal.t2.x.y: invalid value "{}" (does not satisfy encoding/yaml.Validate): error in call to encoding/yaml.Validate: structural cycle:
+            //     ./yamlcycle.cue:30:8
+            //     ./yamlcycle.cue:31:8
+            //     ./yamlcycle.cue:32:8
+            //     ./yamlcycle.cue:33:8
+          }
+        }
+      }
+    }
+    yamlFun: (_|_){
+      // [eval]
+      t1: (struct){
+        x: (struct){
+          y?: (bool){ true }
+        }
+      }
+      t2: (_|_){
+        // [eval]
+        z: (_|_){
+          // [eval]
+          y: (_|_){
+            // [eval] selfCycle.yamlFun.t2.z.y: error in call to encoding/yaml.Validate: structural cycle:
+            //     ./yamlcycle.cue:41:8
+          }
+        }
+        x: (_|_){
+          // [eval]
+          y: (_|_){
+            // [eval] selfCycle.yamlFun.t2.x.y: error in call to encoding/yaml.Validate: structural cycle:
+            //     ./yamlcycle.cue:41:8
+          }
+        }
+      }
+    }
+    yamlValidatePartial: (_|_){
+      // [structural cycle]
+      x: (_|_){
+        // [structural cycle]
+        y: (_|_){
+          // [structural cycle] selfCycle.yamlValidatePartial.x.y: invalid value "{}" (does not satisfy encoding/yaml.ValidatePartial): error in call to encoding/yaml.ValidatePartial: structural cycle:
+          //     ./yamlcycle.cue:44:8
+          //     ./yamlcycle.cue:45:8
+        }
+      }
     }
   }
 }
@@ -635,62 +818,41 @@ Result:
 diff old new
 --- old
 +++ new
-@@ -3,65 +3,48 @@
-     ./cycle.cue:6:7
-     ./cycle.cue:6:14
-     ./cycle.cue:7:13
+@@ -3,24 +3,39 @@
+     ./cycle.cue:4:7
+     ./cycle.cue:4:14
+     ./cycle.cue:5:13
 -noCycle.t1.#x.#x: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
--    ./cycle.cue:6:7
--    ./cycle.cue:6:14
--    ./cycle.cue:7:13
+-    ./cycle.cue:4:7
+-    ./cycle.cue:4:14
+-    ./cycle.cue:5:13
 +noCycle.t1.#x.#x: structural cycle:
-+    ./cycle.cue:6:7
++    ./cycle.cue:4:7
  noCycle.t1._s.#x: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-     ./cycle.cue:6:7
-     ./cycle.cue:6:14
-     ./cycle.cue:7:13
+     ./cycle.cue:4:7
+     ./cycle.cue:4:14
+     ./cycle.cue:5:13
 -noCycle.t1._s.#x.#x: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
--    ./cycle.cue:6:7
--    ./cycle.cue:6:14
--    ./cycle.cue:7:13
+-    ./cycle.cue:4:7
+-    ./cycle.cue:4:14
+-    ./cycle.cue:5:13
+-jsonCycle.t1.x.y.y: structural cycle:
+-    ./jsoncycle.cue:4:22
+-listMatchN.structCycle.x.y.y: structural cycle:
+-    ./listmatchncycle.cue:4:23
 +issue3649.cycle.t1.data.a: invalid value {b:"foo"} (does not satisfy matchN): 0 matched, expected 1:
-+    ./cycle.cue:33:6
-+    ./cycle.cue:30:11
-+    ./cycle.cue:33:13
++    ./cycle.cue:31:6
++    ./cycle.cue:28:11
++    ./cycle.cue:31:13
 +issue3649.cycle.t1.data.a.a: structural cycle:
-+    ./cycle.cue:33:6
- selfCycle.t1.c: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
-     ./cycle.cue:47:5
-     ./cycle.cue:47:12
-     ./cycle.cue:48:5
--selfCycle.t1.c.d: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
--    ./cycle.cue:47:5
--    ./cycle.cue:47:12
--    ./cycle.cue:47:20
--    ./cycle.cue:48:8
--selfCycle.t1.c.d.d: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
--    ./cycle.cue:47:5
--    ./cycle.cue:47:12
--    ./cycle.cue:47:20
--    ./cycle.cue:48:8
--selfCycle.t1.c.d.d.d: structural cycle:
-+selfCycle.t1.c.d: structural cycle:
-     ./cycle.cue:47:5
- selfCycle.t2.c: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-     ./cycle.cue:53:5
-     ./cycle.cue:53:12
-     ./cycle.cue:54:5
--selfCycle.t2.c.d: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
--    ./cycle.cue:53:5
--    ./cycle.cue:53:12
--    ./cycle.cue:53:20
--selfCycle.t2.c.d.d: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
--    ./cycle.cue:53:5
--    ./cycle.cue:53:12
--    ./cycle.cue:53:20
--selfCycle.t2.c.d.d.d: structural cycle:
-+selfCycle.t2.c.d: structural cycle:
-     ./cycle.cue:53:5
++    ./cycle.cue:31:6
++jsonCycle.t1.x.y: invalid value "{}" (does not satisfy encoding/json.Validate): error in call to encoding/json.Validate: structural cycle:
++    ./jsoncycle.cue:4:8
++    ./jsoncycle.cue:5:8
++listMatchN.structCycle.x.y: invalid value [{}] (does not satisfy list.MatchN): number of matched elements is 0: does not satisfy 1:
++    ./listmatchncycle.cue:4:8
++    ./listmatchncycle.cue:4:20
++    ./listmatchncycle.cue:5:8
  issue3443.matchIf.#S: cannot call non-function matchIf (type struct):
      ./matchn.cue:16:7
 +issue3443.cycle1.cycle.s: invalid value {n:{n:_}} (does not satisfy matchN): 0 matched, expected 1:
@@ -708,41 +870,67 @@ diff old new
  issue3443.cycle2.fail.#S: invalid value {n:{n:{n:_}}} (does not satisfy matchN): 0 matched, expected 1:
      ./matchn.cue:55:13
      ./matchn.cue:55:20
--issue3443.cycle2.fail.#S.n: invalid value {n:{n:{n:_}}} (does not satisfy matchN): 0 matched, expected 1:
--    ./matchn.cue:55:13
--    ./matchn.cue:55:20
--    ./matchn.cue:55:28
--    ./matchn.cue:55:40
--issue3443.cycle2.fail.#S.n.n: invalid value {n:{n:{n:_}}} (does not satisfy matchN): 0 matched, expected 1:
--    ./matchn.cue:55:13
--    ./matchn.cue:55:20
--    ./matchn.cue:55:28
--    ./matchn.cue:55:40
--    ./matchn.cue:55:43
--issue3443.cycle2.fail.#S.n.n.n: structural cycle:
-+issue3443.cycle2.fail.#S.n: structural cycle:
-     ./matchn.cue:55:13
+@@ -53,26 +68,21 @@
+     ./yamlcycle.cue:15:8
+ selfCycle.t1.c.d.d.d: structural cycle:
+     ./yamlcycle.cue:14:5
+-selfCycle.t2.c: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
+-    ./yamlcycle.cue:20:5
+-    ./yamlcycle.cue:20:12
+-    ./yamlcycle.cue:21:5
+-selfCycle.t2.c.d: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
+-    ./yamlcycle.cue:20:5
+-    ./yamlcycle.cue:20:12
+-    ./yamlcycle.cue:20:20
+-selfCycle.t2.c.d.d: structural cycle:
+-    ./yamlcycle.cue:20:5
+-selfCycle.yamlVal.t1.x.y.y: structural cycle:
+-    ./yamlcycle.cue:24:22
+-selfCycle.yamlVal.t2.x.y.y: structural cycle:
+-    ./yamlcycle.cue:32:22
+-selfCycle.yamlFun.t1.x.y.y: structural cycle:
+-    ./yamlcycle.cue:36:29
+-selfCycle.yamlFun.t2.x.y.y: structural cycle:
+-    ./yamlcycle.cue:41:28
+-selfCycle.yamlValidatePartial.x.y.y: structural cycle:
+-    ./yamlcycle.cue:44:29
++selfCycle.yamlVal.t1.x.y: invalid value "{}" (does not satisfy encoding/yaml.Validate): error in call to encoding/yaml.Validate: structural cycle:
++    ./yamlcycle.cue:24:8
++    ./yamlcycle.cue:25:8
++selfCycle.yamlVal.t2.x.y: invalid value "{}" (does not satisfy encoding/yaml.Validate): error in call to encoding/yaml.Validate: structural cycle:
++    ./yamlcycle.cue:30:8
++    ./yamlcycle.cue:31:8
++    ./yamlcycle.cue:32:8
++    ./yamlcycle.cue:33:8
++selfCycle.yamlFun.t2.x.y: error in call to encoding/yaml.Validate: structural cycle:
++    ./yamlcycle.cue:41:8
++selfCycle.yamlFun.t2.z.y: error in call to encoding/yaml.Validate: structural cycle:
++    ./yamlcycle.cue:41:8
++selfCycle.yamlValidatePartial.x.y: invalid value "{}" (does not satisfy encoding/yaml.ValidatePartial): error in call to encoding/yaml.ValidatePartial: structural cycle:
++    ./yamlcycle.cue:44:8
++    ./yamlcycle.cue:45:8
  
  Result:
-@@ -78,10 +61,6 @@
-           //     ./cycle.cue:6:7
-           //     ./cycle.cue:6:14
-           //     ./cycle.cue:7:13
+ (_|_){
+@@ -88,10 +98,6 @@
+           //     ./cycle.cue:4:7
+           //     ./cycle.cue:4:14
+           //     ./cycle.cue:5:13
 -          // noCycle.t1._s.#x.#x: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
--          //     ./cycle.cue:6:7
--          //     ./cycle.cue:6:14
--          //     ./cycle.cue:7:13
+-          //     ./cycle.cue:4:7
+-          //     ./cycle.cue:4:14
+-          //     ./cycle.cue:5:13
          }
        }
        #x: (_|_){
-@@ -89,26 +68,25 @@
-         //     ./cycle.cue:6:7
-         //     ./cycle.cue:6:14
-         //     ./cycle.cue:7:13
+@@ -99,21 +105,20 @@
+         //     ./cycle.cue:4:7
+         //     ./cycle.cue:4:14
+         //     ./cycle.cue:5:13
 -        // noCycle.t1.#x.#x: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
--        //     ./cycle.cue:6:7
--        //     ./cycle.cue:6:14
--        //     ./cycle.cue:7:13
+-        //     ./cycle.cue:4:7
+-        //     ./cycle.cue:4:14
+-        //     ./cycle.cue:5:13
 -      }
 -    }
 -  }
@@ -755,7 +943,7 @@ diff old new
 -            b: (string){ "foo" }
 -          }
 +        // noCycle.t1.#x.#x: structural cycle:
-+        //     ./cycle.cue:6:7
++        //     ./cycle.cue:4:7
 +      }
 +    }
 +  }
@@ -771,13 +959,7 @@ diff old new
          }
          #c: (#struct){
            b?: (string){ string }
-           a?: (_){ matchN(1, (#list){
--              0: (_|_){// 〈2;#c〉
-+              0: (_|_){// &[〈2;#c〉]
-               }
-             }) }
-         }
-@@ -115,7 +93,6 @@
+@@ -125,7 +130,6 @@
        }
        t2: (struct){
          x: (struct){
@@ -785,7 +967,7 @@ diff old new
            y: (struct){
              a: (struct){
                d: (struct){
-@@ -123,14 +100,15 @@
+@@ -133,6 +137,7 @@
                }
              }
            }
@@ -793,17 +975,7 @@ diff old new
          }
          c: (struct){
            b?: (string){ string }
-           y: (struct){
-             a?: (_){ matchN(1, (#list){
--                0: (_|_){// {
-+                0: (_|_){// &[{
-                   //   d: 〈4;c〉
--                  // }
-+                  // }]
-                 }
-               }) }
-           }
-@@ -137,18 +115,27 @@
+@@ -147,13 +152,22 @@
          }
        }
      }
@@ -822,120 +994,51 @@ diff old new
 +          // [eval]
 +          a: (_|_){
 +            // [eval] issue3649.cycle.t1.data.a: invalid value {b:"foo"} (does not satisfy matchN): 0 matched, expected 1:
-+            //     ./cycle.cue:33:6
-+            //     ./cycle.cue:30:11
-+            //     ./cycle.cue:33:13
++            //     ./cycle.cue:31:6
++            //     ./cycle.cue:28:11
++            //     ./cycle.cue:31:13
 +            // issue3649.cycle.t1.data.a.a: structural cycle:
-+            //     ./cycle.cue:33:6
++            //     ./cycle.cue:31:6
 +            b: (string){ "foo" }
 +          }
 +          b: (string){ string }
          }
          #c: (#struct){
            b: (string){ string }
-           a: (_){ matchN(1, (#list){
--              0: (_|_){// 〈2;#c〉
-+              0: (_|_){// &[〈2;#c〉]
-               }
-             }) }
-         }
-@@ -161,8 +148,8 @@
-       a?: ((string|bytes)){ "encoding/yaml".Validate(yamlNoCycle.#c) }
-     }
-     data: (#struct){
--      b?: (string){ string }
-       a: (string){ "{a: \"b: foo\"}" }
-+      b?: (string){ string }
-     }
-   }
-   selfCycle: (_|_){
-@@ -174,17 +161,7 @@
-         //     ./cycle.cue:47:5
-         //     ./cycle.cue:47:12
-         //     ./cycle.cue:48:5
--        // selfCycle.t1.c.d: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
--        //     ./cycle.cue:47:5
--        //     ./cycle.cue:47:12
--        //     ./cycle.cue:47:20
--        //     ./cycle.cue:48:8
--        // selfCycle.t1.c.d.d: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
--        //     ./cycle.cue:47:5
--        //     ./cycle.cue:47:12
--        //     ./cycle.cue:47:20
--        //     ./cycle.cue:48:8
--        // selfCycle.t1.c.d.d.d: structural cycle:
-+        // selfCycle.t1.c.d: structural cycle:
-         //     ./cycle.cue:47:5
-         d: (struct){
-         }
-@@ -197,15 +174,7 @@
-         //     ./cycle.cue:53:5
-         //     ./cycle.cue:53:12
-         //     ./cycle.cue:54:5
--        // selfCycle.t2.c.d: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
--        //     ./cycle.cue:53:5
--        //     ./cycle.cue:53:12
--        //     ./cycle.cue:53:20
--        // selfCycle.t2.c.d.d: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
--        //     ./cycle.cue:53:5
--        //     ./cycle.cue:53:12
--        //     ./cycle.cue:53:20
--        // selfCycle.t2.c.d.d.d: structural cycle:
-+        // selfCycle.t2.c.d: structural cycle:
-         //     ./cycle.cue:53:5
+@@ -224,8 +238,12 @@
+     t1: (_|_){
+       // [structural cycle]
+       x: (_|_){
+-        // [structural cycle] jsonCycle.t1.x.y.y: structural cycle:
+-        //     ./jsoncycle.cue:4:22
++        // [structural cycle]
++        y: (_|_){
++          // [structural cycle] jsonCycle.t1.x.y: invalid value "{}" (does not satisfy encoding/json.Validate): error in call to encoding/json.Validate: structural cycle:
++          //     ./jsoncycle.cue:4:8
++          //     ./jsoncycle.cue:5:8
++        }
        }
      }
-@@ -267,20 +236,20 @@
-   issue3410: (struct){
-     _s: (struct){
-       #x: (_){ matchN(1, (#list){
--          0: (_|_){// 〈2;_s〉
--          }
--          1: (_|_){// [
-+          0: (_|_){// &[〈2;_s〉]
-+          }
-+          1: (_|_){// &[[
-             //   ...〈3;_s〉,
--            // ]
-+            // ]]
-           }
-         }) }
-     }
-     #x: (_){ matchN(1, (#list){
--        0: (_|_){// 〈2;_s〉
--        }
--        1: (_|_){// [
-+        0: (_|_){// &[〈2;_s〉]
-+        }
-+        1: (_|_){// &[[
-           //   ...〈3;_s〉,
--          // ]
-+          // ]]
-         }
-       }) }
    }
-@@ -287,9 +256,9 @@
-   issue3420: (struct){
-     matches1: (struct){
-       #S: (_){ matchN(1, (#list){
--          0: (_|_){// _
--          }
--          1: (_|_){// _|_(explicit error (_|_ literal) in source)
-+          0: (_|_){// &[_]
+@@ -234,8 +252,15 @@
+     structCycle: (_|_){
+       // [eval]
+       x: (_|_){
+-        // [eval] listMatchN.structCycle.x.y.y: structural cycle:
+-        //     ./listmatchncycle.cue:4:23
++        // [eval]
++        y: (_|_){
++          // [eval] listMatchN.structCycle.x.y: invalid value [{}] (does not satisfy list.MatchN): number of matched elements is 0: does not satisfy 1:
++          //     ./listmatchncycle.cue:4:8
++          //     ./listmatchncycle.cue:4:20
++          //     ./listmatchncycle.cue:5:8
++          0: (struct){
 +          }
-+          1: (_|_){// &[_|_(explicit error (_|_ literal) in source)]
-           }
-         }) }
-       s: (int){ 2 }
-@@ -306,13 +275,13 @@
++        }
+       }
      }
-     noCycle: (struct){
-       #S: (_){ matchN(1, (#list){
--          0: (_|_){// {
-+          0: (_|_){// &[{
-             //   n?: (〈2;#S〉 & (int|{}))
--            // }
-+            // }]
+     ok: (struct){
+@@ -298,7 +323,7 @@
            }
          }) }
        noHang: (struct){
@@ -944,40 +1047,17 @@ diff old new
            n: (struct){
              n: (_){ _ }
            }
-@@ -321,29 +290,43 @@
-     }
-     noCycle2: (struct){
-       #S: (_){ matchN(1, (#list){
--          0: (_|_){// {
-+          0: (_|_){// &[{
-             //   n?: (int|〈2;#S〉)
--            // }
--          }
--        }) }
--    }
--    cycle1: (struct){
--      #S: (_){ matchN(1, (#list){
--          0: (_|_){// {
-+            // }]
-+          }
-+        }) }
-+    }
-+    cycle1: (_|_){
-+      // [eval]
-+      #S: (_){ matchN(1, (#list){
-+          0: (_|_){// &[{
-             //   n: 〈2;#S〉
--            // }
-+            // }]
+@@ -313,7 +338,8 @@
            }
          }) }
-       ok: (struct){
-         s: (_){ matchN(1, (#list){
--            0: (_|_){// {
-+            0: (_|_){// &[{
-               //   n: 〈2;#S〉
--              // }
-+              // }]
+     }
+-    cycle1: (struct){
++    cycle1: (_|_){
++      // [eval]
+       #S: (_){ matchN(1, (#list){
+           0: (_|_){// {
+             //   n: 〈2;#S〉
+@@ -328,8 +354,21 @@
              }
            }) }
        }
@@ -1001,90 +1081,149 @@ diff old new
            n: (struct){
              n: (_){ _ }
            }
-@@ -358,18 +341,7 @@
-           // [eval] issue3443.cycle2.fail.#S: invalid value {n:{n:{n:_}}} (does not satisfy matchN): 0 matched, expected 1:
-           //     ./matchn.cue:55:13
-           //     ./matchn.cue:55:20
--          // issue3443.cycle2.fail.#S.n: invalid value {n:{n:{n:_}}} (does not satisfy matchN): 0 matched, expected 1:
--          //     ./matchn.cue:55:13
--          //     ./matchn.cue:55:20
--          //     ./matchn.cue:55:28
--          //     ./matchn.cue:55:40
--          // issue3443.cycle2.fail.#S.n.n: invalid value {n:{n:{n:_}}} (does not satisfy matchN): 0 matched, expected 1:
--          //     ./matchn.cue:55:13
--          //     ./matchn.cue:55:20
--          //     ./matchn.cue:55:28
--          //     ./matchn.cue:55:40
--          //     ./matchn.cue:55:43
--          // issue3443.cycle2.fail.#S.n.n.n: structural cycle:
-+          // issue3443.cycle2.fail.#S.n: structural cycle:
-           //     ./matchn.cue:55:13
-           n: (#struct){
-             n: (#struct){
-@@ -396,11 +368,11 @@
-         //     ./matchn.cue:63:29
-       }
-       #s: (_){ matchN(1, (#list){
--          0: (_|_){// matchN(1, [
-+          0: (_|_){// &[matchN(1, [
-             //   {
-             //     a!: _
-             //   },
--            // ])
-+            // ])]
-           }
-         }) }
+@@ -397,8 +436,8 @@
+       a?: ((string|bytes)){ "encoding/yaml".Validate(yamlNoCycle.#c) }
      }
+     data: (#struct){
+-      b?: (string){ string }
+       a: (string){ "{a: \"b: foo\"}" }
++      b?: (string){ string }
+     }
+   }
+   selfCycle: (_|_){
+@@ -426,19 +465,8 @@
+         }
+       }
+     }
+-    t2: (_|_){
+-      // [eval]
+-      c: (_|_){
+-        // [eval] selfCycle.t2.c: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
+-        //     ./yamlcycle.cue:20:5
+-        //     ./yamlcycle.cue:20:12
+-        //     ./yamlcycle.cue:21:5
+-        // selfCycle.t2.c.d: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
+-        //     ./yamlcycle.cue:20:5
+-        //     ./yamlcycle.cue:20:12
+-        //     ./yamlcycle.cue:20:20
+-        // selfCycle.t2.c.d.d: structural cycle:
+-        //     ./yamlcycle.cue:20:5
++    t2: (struct){
++      c: (struct){
+       }
+     }
+     yamlVal: (_|_){
+@@ -446,25 +474,33 @@
+       t1: (_|_){
+         // [eval]
+         x: (_|_){
+-          // [eval] selfCycle.yamlVal.t1.x.y.y: structural cycle:
+-          //     ./yamlcycle.cue:24:22
+-        }
+-      }
+-      t2: (_|_){
+-        // [eval]
+-        x: (_|_){
+-          // [eval] selfCycle.yamlVal.t2.x.y.y: structural cycle:
+-          //     ./yamlcycle.cue:32:22
++          // [eval]
++          y: (_|_){
++            // [eval] selfCycle.yamlVal.t1.x.y: invalid value "{}" (does not satisfy encoding/yaml.Validate): error in call to encoding/yaml.Validate: structural cycle:
++            //     ./yamlcycle.cue:24:8
++            //     ./yamlcycle.cue:25:8
++          }
++        }
++      }
++      t2: (_|_){
++        // [eval]
++        x: (_|_){
++          // [eval]
++          y: (_|_){
++            // [eval] selfCycle.yamlVal.t2.x.y: invalid value "{}" (does not satisfy encoding/yaml.Validate): error in call to encoding/yaml.Validate: structural cycle:
++            //     ./yamlcycle.cue:30:8
++            //     ./yamlcycle.cue:31:8
++            //     ./yamlcycle.cue:32:8
++            //     ./yamlcycle.cue:33:8
++          }
+         }
+       }
+     }
+     yamlFun: (_|_){
+       // [eval]
+-      t1: (_|_){
+-        // [structural cycle]
+-        x: (_|_){
+-          // [structural cycle] selfCycle.yamlFun.t1.x.y.y: structural cycle:
+-          //     ./yamlcycle.cue:36:29
++      t1: (struct){
++        x: (struct){
++          y?: (bool){ true }
+         }
+       }
+       t2: (_|_){
+@@ -472,13 +508,16 @@
+         z: (_|_){
+           // [eval]
+           y: (_|_){
+-            // [eval] selfCycle.yamlFun.t2.x.y.y: structural cycle:
+-            //     ./yamlcycle.cue:41:28
+-          }
+-        }
+-        x: (_|_){
+-          // [eval] selfCycle.yamlFun.t2.x.y.y: structural cycle:
+-          //     ./yamlcycle.cue:41:28
++            // [eval] selfCycle.yamlFun.t2.z.y: error in call to encoding/yaml.Validate: structural cycle:
++            //     ./yamlcycle.cue:41:8
++          }
++        }
++        x: (_|_){
++          // [eval]
++          y: (_|_){
++            // [eval] selfCycle.yamlFun.t2.x.y: error in call to encoding/yaml.Validate: structural cycle:
++            //     ./yamlcycle.cue:41:8
++          }
+         }
+       }
+     }
+@@ -485,8 +524,12 @@
+     yamlValidatePartial: (_|_){
+       // [structural cycle]
+       x: (_|_){
+-        // [structural cycle] selfCycle.yamlValidatePartial.x.y.y: structural cycle:
+-        //     ./yamlcycle.cue:44:29
++        // [structural cycle]
++        y: (_|_){
++          // [structural cycle] selfCycle.yamlValidatePartial.x.y: invalid value "{}" (does not satisfy encoding/yaml.ValidatePartial): error in call to encoding/yaml.ValidatePartial: structural cycle:
++          //     ./yamlcycle.cue:44:8
++          //     ./yamlcycle.cue:45:8
++        }
+       }
+     }
+   }
 -- diff/todo/p2 --
 issue3443: Sort out differences in reporting of cycles.
 -- out/eval --
 Errors:
 noCycle.t1.#x: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-    ./cycle.cue:6:7
-    ./cycle.cue:6:14
-    ./cycle.cue:7:13
+    ./cycle.cue:4:7
+    ./cycle.cue:4:14
+    ./cycle.cue:5:13
 noCycle.t1.#x.#x: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-    ./cycle.cue:6:7
-    ./cycle.cue:6:14
-    ./cycle.cue:7:13
+    ./cycle.cue:4:7
+    ./cycle.cue:4:14
+    ./cycle.cue:5:13
 noCycle.t1._s.#x: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-    ./cycle.cue:6:7
-    ./cycle.cue:6:14
-    ./cycle.cue:7:13
+    ./cycle.cue:4:7
+    ./cycle.cue:4:14
+    ./cycle.cue:5:13
 noCycle.t1._s.#x.#x: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-    ./cycle.cue:6:7
-    ./cycle.cue:6:14
-    ./cycle.cue:7:13
-selfCycle.t1.c: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
-    ./cycle.cue:47:5
-    ./cycle.cue:47:12
-    ./cycle.cue:48:5
-selfCycle.t1.c.d: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
-    ./cycle.cue:47:5
-    ./cycle.cue:47:12
-    ./cycle.cue:47:20
-    ./cycle.cue:48:8
-selfCycle.t1.c.d.d: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
-    ./cycle.cue:47:5
-    ./cycle.cue:47:12
-    ./cycle.cue:47:20
-    ./cycle.cue:48:8
-selfCycle.t1.c.d.d.d: structural cycle:
-    ./cycle.cue:47:5
-selfCycle.t2.c: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-    ./cycle.cue:53:5
-    ./cycle.cue:53:12
-    ./cycle.cue:54:5
-selfCycle.t2.c.d: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-    ./cycle.cue:53:5
-    ./cycle.cue:53:12
-    ./cycle.cue:53:20
-selfCycle.t2.c.d.d: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-    ./cycle.cue:53:5
-    ./cycle.cue:53:12
-    ./cycle.cue:53:20
-selfCycle.t2.c.d.d.d: structural cycle:
-    ./cycle.cue:53:5
+    ./cycle.cue:4:7
+    ./cycle.cue:4:14
+    ./cycle.cue:5:13
+jsonCycle.t1.x.y.y: structural cycle:
+    ./jsoncycle.cue:4:22
+listMatchN.structCycle.x.y.y: structural cycle:
+    ./listmatchncycle.cue:4:23
 issue3443.matchIf.#S: cannot call non-function matchIf (type struct):
     ./matchn.cue:16:7
 issue3443.cycle2.fail.#S: invalid value {n:{n:{n:_}}} (does not satisfy matchN): 0 matched, expected 1:
@@ -1103,6 +1242,42 @@ issue3443.cycle2.fail.#S.n.n: invalid value {n:{n:{n:_}}} (does not satisfy matc
     ./matchn.cue:55:43
 issue3443.cycle2.fail.#S.n.n.n: structural cycle:
     ./matchn.cue:55:13
+selfCycle.t1.c: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
+    ./yamlcycle.cue:14:5
+    ./yamlcycle.cue:14:12
+    ./yamlcycle.cue:15:5
+selfCycle.t1.c.d: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
+    ./yamlcycle.cue:14:5
+    ./yamlcycle.cue:14:12
+    ./yamlcycle.cue:14:20
+    ./yamlcycle.cue:15:8
+selfCycle.t1.c.d.d: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
+    ./yamlcycle.cue:14:5
+    ./yamlcycle.cue:14:12
+    ./yamlcycle.cue:14:20
+    ./yamlcycle.cue:15:8
+selfCycle.t1.c.d.d.d: structural cycle:
+    ./yamlcycle.cue:14:5
+selfCycle.t2.c: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
+    ./yamlcycle.cue:20:5
+    ./yamlcycle.cue:20:12
+    ./yamlcycle.cue:21:5
+selfCycle.t2.c.d: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
+    ./yamlcycle.cue:20:5
+    ./yamlcycle.cue:20:12
+    ./yamlcycle.cue:20:20
+selfCycle.t2.c.d.d: structural cycle:
+    ./yamlcycle.cue:20:5
+selfCycle.yamlVal.t1.x.y.y: structural cycle:
+    ./yamlcycle.cue:24:22
+selfCycle.yamlVal.t2.x.y.y: structural cycle:
+    ./yamlcycle.cue:32:22
+selfCycle.yamlFun.t1.x.y.y: structural cycle:
+    ./yamlcycle.cue:36:29
+selfCycle.yamlFun.t2.x.y.y: structural cycle:
+    ./yamlcycle.cue:41:28
+selfCycle.yamlValidatePartial.x.y.y: structural cycle:
+    ./yamlcycle.cue:44:29
 
 Result:
 (_|_){
@@ -1115,24 +1290,24 @@ Result:
         // [eval]
         #x: (_|_){
           // [eval] noCycle.t1._s.#x: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-          //     ./cycle.cue:6:7
-          //     ./cycle.cue:6:14
-          //     ./cycle.cue:7:13
+          //     ./cycle.cue:4:7
+          //     ./cycle.cue:4:14
+          //     ./cycle.cue:5:13
           // noCycle.t1._s.#x.#x: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-          //     ./cycle.cue:6:7
-          //     ./cycle.cue:6:14
-          //     ./cycle.cue:7:13
+          //     ./cycle.cue:4:7
+          //     ./cycle.cue:4:14
+          //     ./cycle.cue:5:13
         }
       }
       #x: (_|_){
         // [eval] noCycle.t1.#x: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-        //     ./cycle.cue:6:7
-        //     ./cycle.cue:6:14
-        //     ./cycle.cue:7:13
+        //     ./cycle.cue:4:7
+        //     ./cycle.cue:4:14
+        //     ./cycle.cue:5:13
         // noCycle.t1.#x.#x: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-        //     ./cycle.cue:6:7
-        //     ./cycle.cue:6:14
-        //     ./cycle.cue:7:13
+        //     ./cycle.cue:4:7
+        //     ./cycle.cue:4:14
+        //     ./cycle.cue:5:13
       }
     }
   }
@@ -1195,61 +1370,6 @@ Result:
       }
     }
   }
-  yamlNoCycle: (struct){
-    #c: (#struct){
-      b?: (string){ string }
-      a?: ((string|bytes)){ "encoding/yaml".Validate(yamlNoCycle.#c) }
-    }
-    data: (#struct){
-      b?: (string){ string }
-      a: (string){ "{a: \"b: foo\"}" }
-    }
-  }
-  selfCycle: (_|_){
-    // [eval]
-    t1: (_|_){
-      // [eval]
-      c: (_|_){
-        // [eval] selfCycle.t1.c: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
-        //     ./cycle.cue:47:5
-        //     ./cycle.cue:47:12
-        //     ./cycle.cue:48:5
-        // selfCycle.t1.c.d: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
-        //     ./cycle.cue:47:5
-        //     ./cycle.cue:47:12
-        //     ./cycle.cue:47:20
-        //     ./cycle.cue:48:8
-        // selfCycle.t1.c.d.d: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
-        //     ./cycle.cue:47:5
-        //     ./cycle.cue:47:12
-        //     ./cycle.cue:47:20
-        //     ./cycle.cue:48:8
-        // selfCycle.t1.c.d.d.d: structural cycle:
-        //     ./cycle.cue:47:5
-        d: (struct){
-        }
-      }
-    }
-    t2: (_|_){
-      // [eval]
-      c: (_|_){
-        // [eval] selfCycle.t2.c: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-        //     ./cycle.cue:53:5
-        //     ./cycle.cue:53:12
-        //     ./cycle.cue:54:5
-        // selfCycle.t2.c.d: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-        //     ./cycle.cue:53:5
-        //     ./cycle.cue:53:12
-        //     ./cycle.cue:53:20
-        // selfCycle.t2.c.d.d: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
-        //     ./cycle.cue:53:5
-        //     ./cycle.cue:53:12
-        //     ./cycle.cue:53:20
-        // selfCycle.t2.c.d.d.d: structural cycle:
-        //     ./cycle.cue:53:5
-      }
-    }
-  }
   builtinCyclePerm0: (struct){
     X: (string){ "mod.test" }
     Y: (struct){
@@ -1302,6 +1422,37 @@ Result:
         host: (string){ "mod.test" }
       }
       host: (string){ "mod.test" }
+    }
+  }
+  jsonCycle: (_|_){
+    // [structural cycle]
+    t1: (_|_){
+      // [structural cycle]
+      x: (_|_){
+        // [structural cycle] jsonCycle.t1.x.y.y: structural cycle:
+        //     ./jsoncycle.cue:4:22
+      }
+    }
+  }
+  listMatchN: (_|_){
+    // [eval]
+    structCycle: (_|_){
+      // [eval]
+      x: (_|_){
+        // [eval] listMatchN.structCycle.x.y.y: structural cycle:
+        //     ./listmatchncycle.cue:4:23
+      }
+    }
+    ok: (struct){
+      x: (struct){
+        y?: (list){ list.MatchN(1, listMatchN.ok.x) }
+      }
+      z: (struct){
+        y: (#list){
+          0: (struct){
+          }
+        }
+      }
     }
   }
   issue3410: (struct){
@@ -1427,13 +1578,13 @@ Result:
         //     ./matchn.cue:63:6
         //     ./matchn.cue:62:8
         //     ./matchn.cue:63:13
+        // issue3633.final.a: field is required but not present:
+        //     ./matchn.cue:63:17
+        //     ./matchn.cue:63:29
         // issue3633.final.data: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
         //     ./matchn.cue:63:17
         //     ./matchn.cue:62:8
         //     ./matchn.cue:63:24
-        // issue3633.final.data.a: field is required but not present:
-        //     ./matchn.cue:63:17
-        //     ./matchn.cue:63:29
       }
       #s: (_){ matchN(1, (#list){
           0: (_|_){// matchN(1, [
@@ -1443,6 +1594,105 @@ Result:
             // ])
           }
         }) }
+    }
+  }
+  yamlNoCycle: (struct){
+    #c: (#struct){
+      b?: (string){ string }
+      a?: ((string|bytes)){ "encoding/yaml".Validate(yamlNoCycle.#c) }
+    }
+    data: (#struct){
+      b?: (string){ string }
+      a: (string){ "{a: \"b: foo\"}" }
+    }
+  }
+  selfCycle: (_|_){
+    // [eval]
+    t1: (_|_){
+      // [eval]
+      c: (_|_){
+        // [eval] selfCycle.t1.c: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
+        //     ./yamlcycle.cue:14:5
+        //     ./yamlcycle.cue:14:12
+        //     ./yamlcycle.cue:15:5
+        // selfCycle.t1.c.d: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
+        //     ./yamlcycle.cue:14:5
+        //     ./yamlcycle.cue:14:12
+        //     ./yamlcycle.cue:14:20
+        //     ./yamlcycle.cue:15:8
+        // selfCycle.t1.c.d.d: invalid value {d:{}} (does not satisfy matchN): 0 matched, expected 1:
+        //     ./yamlcycle.cue:14:5
+        //     ./yamlcycle.cue:14:12
+        //     ./yamlcycle.cue:14:20
+        //     ./yamlcycle.cue:15:8
+        // selfCycle.t1.c.d.d.d: structural cycle:
+        //     ./yamlcycle.cue:14:5
+        d: (struct){
+        }
+      }
+    }
+    t2: (_|_){
+      // [eval]
+      c: (_|_){
+        // [eval] selfCycle.t2.c: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
+        //     ./yamlcycle.cue:20:5
+        //     ./yamlcycle.cue:20:12
+        //     ./yamlcycle.cue:21:5
+        // selfCycle.t2.c.d: invalid value {} (does not satisfy matchN): 0 matched, expected 1:
+        //     ./yamlcycle.cue:20:5
+        //     ./yamlcycle.cue:20:12
+        //     ./yamlcycle.cue:20:20
+        // selfCycle.t2.c.d.d: structural cycle:
+        //     ./yamlcycle.cue:20:5
+      }
+    }
+    yamlVal: (_|_){
+      // [eval]
+      t1: (_|_){
+        // [eval]
+        x: (_|_){
+          // [eval] selfCycle.yamlVal.t1.x.y.y: structural cycle:
+          //     ./yamlcycle.cue:24:22
+        }
+      }
+      t2: (_|_){
+        // [eval]
+        x: (_|_){
+          // [eval] selfCycle.yamlVal.t2.x.y.y: structural cycle:
+          //     ./yamlcycle.cue:32:22
+        }
+      }
+    }
+    yamlFun: (_|_){
+      // [eval]
+      t1: (_|_){
+        // [structural cycle]
+        x: (_|_){
+          // [structural cycle] selfCycle.yamlFun.t1.x.y.y: structural cycle:
+          //     ./yamlcycle.cue:36:29
+        }
+      }
+      t2: (_|_){
+        // [eval]
+        z: (_|_){
+          // [eval]
+          y: (_|_){
+            // [eval] selfCycle.yamlFun.t2.x.y.y: structural cycle:
+            //     ./yamlcycle.cue:41:28
+          }
+        }
+        x: (_|_){
+          // [eval] selfCycle.yamlFun.t2.x.y.y: structural cycle:
+          //     ./yamlcycle.cue:41:28
+        }
+      }
+    }
+    yamlValidatePartial: (_|_){
+      // [structural cycle]
+      x: (_|_){
+        // [structural cycle] selfCycle.yamlValidatePartial.x.y.y: structural cycle:
+        //     ./yamlcycle.cue:44:29
+      }
     }
   }
 }
@@ -1522,38 +1772,6 @@ Result:
       }
     }
   }
-  yamlNoCycle: {
-    #c: {
-      b?: string
-      a?: 〈import;"encoding/yaml"〉.Validate(〈1;#c〉)
-    }
-    data: 〈0;#c〉
-    data: {
-      a: "{a: \"b: foo\"}"
-    }
-  }
-  selfCycle: {
-    t1: {
-      c: matchN(1, [
-        {
-          d: 〈2;c〉
-        },
-      ])
-      c: {
-        d: {}
-      }
-    }
-  }
-  selfCycle: {
-    t2: {
-      c: matchN(1, [
-        {
-          d: 〈2;c〉
-        },
-      ])
-      c: {}
-    }
-  }
 }
 --- in.cue
 {
@@ -1603,6 +1821,47 @@ Result:
     Y: {
       #components: 〈import;regexp〉.FindNamedSubmatch("^(?P<host>[[:alnum:].]+)$", 〈1;X〉)
       host: 〈0;#components〉.host
+    }
+  }
+}
+--- jsoncycle.cue
+{
+  jsonCycle: {
+    t1: {
+      x: {
+        y: 〈import;"encoding/json"〉.Validate(〈1;x〉)
+      }
+      x: {
+        y: "{}"
+      }
+    }
+  }
+}
+--- listmatchncycle.cue
+{
+  listMatchN: {
+    structCycle: {
+      x: {
+        y: 〈import;list〉.MatchN(1, 〈1;x〉)
+      }
+      x: {
+        y: [
+          {},
+        ]
+      }
+    }
+  }
+  listMatchN: {
+    ok: {
+      x: {
+        y?: 〈import;list〉.MatchN(1, 〈1;x〉)
+      }
+      z: 〈0;x〉
+      z: {
+        y: [
+          {},
+        ]
+      }
     }
   }
 }
@@ -1703,6 +1962,103 @@ Result:
           },
         ]),
       ])
+    }
+  }
+}
+--- yamlcycle.cue
+{
+  yamlNoCycle: {
+    #c: {
+      b?: string
+      a?: 〈import;"encoding/yaml"〉.Validate(〈1;#c〉)
+    }
+    data: 〈0;#c〉
+    data: {
+      a: "{a: \"b: foo\"}"
+    }
+  }
+  selfCycle: {
+    t1: {
+      c: matchN(1, [
+        {
+          d: 〈2;c〉
+        },
+      ])
+      c: {
+        d: {}
+      }
+    }
+  }
+  selfCycle: {
+    t2: {
+      c: matchN(1, [
+        {
+          d: 〈2;c〉
+        },
+      ])
+      c: {}
+    }
+  }
+  selfCycle: {
+    yamlVal: {
+      t1: {
+        x: {
+          y: 〈import;"encoding/yaml"〉.Validate(〈1;x〉)
+        }
+        x: {
+          y: "{}"
+        }
+      }
+    }
+  }
+  selfCycle: {
+    yamlVal: {
+      t2: {
+        x: {
+          y: 〈import;"encoding/yaml"〉.Validate(〈1;x〉)
+        }
+        x: {
+          y: "{}"
+        }
+        x: {
+          y: 〈import;"encoding/yaml"〉.Validate(〈1;x〉)
+        }
+        x: {
+          y: "{}"
+        }
+      }
+    }
+  }
+  selfCycle: {
+    yamlFun: {
+      t1: {
+        x: {
+          y?: 〈import;"encoding/yaml"〉.Validate("{}", 〈1;x〉)
+        }
+      }
+    }
+  }
+  selfCycle: {
+    yamlFun: {
+      t2: {
+        z: (〈0;x〉 & _|_(no sharing))
+        z: {
+          y: "{}"
+        }
+        x: {
+          y: 〈import;"encoding/yaml"〉.Validate("{}", 〈1;x〉)
+        }
+      }
+    }
+  }
+  selfCycle: {
+    yamlValidatePartial: {
+      x: {
+        y: 〈import;"encoding/yaml"〉.ValidatePartial(〈1;x〉)
+      }
+      x: {
+        y: "{}"
+      }
     }
   }
 }

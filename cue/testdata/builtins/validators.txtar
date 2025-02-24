@@ -375,7 +375,9 @@ Result:
         0: (int){ 1 }
       }
     }
-    incomplete1: (struct){
+    incomplete1: (_|_){
+      // [incomplete] issue2098.incomplete1: index out of range [0] with length 1:
+      //     ./in.cue:113:5
       _a: (_|_){
         // [incomplete] issue2098.incomplete1._a: invalid value [] (does not satisfy list.MinItems(1)): len(list) < MinItems(1) (0 < 1):
         //     ./in.cue:112:6
@@ -485,7 +487,7 @@ Result:
       }
       incomplete: (struct){
         A: (int){ &(matchN(1, (#list){
-            0: (_|_){// &[>10]
+            0: (_|_){// >10
             }
           }), int) }
       }
@@ -520,17 +522,17 @@ Result:
       b: (int){ 1 }
     }
     #X: (_){ matchN(1, (#list){
-        0: (_|_){// &[{
+        0: (_|_){// {
           //   b: int
-          // }]
+          // }
         }
       }) }
   }
   issue3661: (struct){
     #X: (_){ matchN(1, (#list){
-        0: (_|_){// &[{
+        0: (_|_){// {
           //   b!: int
-          // }]
+          // }
         }
       }) }
     a: (#struct){
@@ -539,13 +541,13 @@ Result:
   }
   issue3678: (struct){
     #X: (_){ matchN(1, (#list){
-        0: (_|_){// &[{
+        0: (_|_){// {
           //   a!: string
-          // }]
+          // }
         }
-        1: (_|_){// &[{
+        1: (_|_){// {
           //   c!: string
-          // }]
+          // }
         }
       }) }
     x: (#struct){
@@ -586,20 +588,20 @@ diff old new
  
  Result:
  (_|_){
-@@ -141,11 +151,7 @@
-         0: (int){ 1 }
+@@ -142,10 +152,8 @@
        }
      }
--    incomplete1: (_|_){
+     incomplete1: (_|_){
 -      // [incomplete] issue2098.incomplete1._a: invalid value [] (does not satisfy list.MinItems(1)): len(list) < MinItems(1) (0 < 1):
 -      //     ./in.cue:112:6
 -      //     ./in.cue:111:6
 -      //     ./in.cue:112:20
-+    incomplete1: (struct){
++      // [incomplete] issue2098.incomplete1: index out of range [0] with length 1:
++      //     ./in.cue:113:5
        _a: (_|_){
          // [incomplete] issue2098.incomplete1._a: invalid value [] (does not satisfy list.MinItems(1)): len(list) < MinItems(1) (0 < 1):
          //     ./in.cue:112:6
-@@ -209,7 +215,7 @@
+@@ -209,7 +217,7 @@
        failAfter: (_|_){
          // [eval]
          A: (_|_){
@@ -608,16 +610,7 @@ diff old new
            //     ./issue3474.cue:12:5
            //     ./issue3474.cue:12:22
            //     ./issue3474.cue:13:5
-@@ -255,7 +261,7 @@
-       }
-       incomplete: (struct){
-         A: (int){ &(matchN(1, (#list){
--            0: (_|_){// >10
-+            0: (_|_){// &[>10]
-             }
-           }), int) }
-       }
-@@ -270,6 +276,16 @@
+@@ -270,6 +278,16 @@
            //     ./issue3474.cue:53:5
            //     ./issue3474.cue:53:12
            //     ./issue3474.cue:54:5
@@ -634,64 +627,32 @@ diff old new
            C: (int){ 1 }
          }
        }
-@@ -276,42 +292,42 @@
+@@ -276,7 +294,7 @@
      }
    }
    issue3639: (struct){
 -    a: (struct){
--      b: (int){ 1 }
--    }
--    #X: (_){ matchN(1, (#list){
--        0: (_|_){// {
 +    a: (#struct){
-+      b: (int){ 1 }
-+    }
-+    #X: (_){ matchN(1, (#list){
-+        0: (_|_){// &[{
-           //   b: int
--          // }
-+          // }]
+       b: (int){ 1 }
+     }
+     #X: (_){ matchN(1, (#list){
+@@ -293,7 +311,7 @@
+           // }
          }
        }) }
-   }
-   issue3661: (struct){
-     #X: (_){ matchN(1, (#list){
--        0: (_|_){// {
-+        0: (_|_){// &[{
-           //   b!: int
--          // }
--        }
--      }) }
 -    a: (struct){
-+          // }]
-+        }
-+      }) }
 +    a: (#struct){
        b: (int){ 1 }
      }
    }
-   issue3678: (struct){
-     #X: (_){ matchN(1, (#list){
--        0: (_|_){// {
-+        0: (_|_){// &[{
-           //   a!: string
--          // }
--        }
--        1: (_|_){// {
-+          // }]
-+        }
-+        1: (_|_){// &[{
-           //   c!: string
--          // }
--        }
--      }) }
+@@ -308,10 +326,10 @@
+           // }
+         }
+       }) }
 -    x: (struct){
 -      c: (string){ "c" }
 -    }
 -    y: (struct){
-+          // }]
-+        }
-+      }) }
 +    x: (#struct){
 +      c: (string){ "c" }
 +    }

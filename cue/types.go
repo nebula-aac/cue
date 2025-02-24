@@ -21,6 +21,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"slices"
 	"strings"
 
 	"github.com/cockroachdb/apd/v3"
@@ -1579,8 +1580,8 @@ func (v Value) FillPath(p Path, x interface{}) Value {
 	default:
 		expr = convert.GoValueToValue(ctx, x, true)
 	}
-	for i := len(p.path) - 1; i >= 0; i-- {
-		switch sel := p.path[i]; sel.Type() {
+	for _, sel := range slices.Backward(p.path) {
+		switch sel.Type() {
 		case StringLabel | PatternConstraint:
 			expr = &adt.StructLit{Decls: []adt.Decl{
 				&adt.BulkOptionalField{
@@ -1704,21 +1705,6 @@ func allowed(ctx *adt.OpContext, parent, n *adt.Vertex) *adt.Bottom {
 	return nil
 }
 
-func addConjuncts(ctx *adt.OpContext, dst, src *adt.Vertex) {
-	c := adt.MakeRootConjunct(nil, src)
-	c.CloseInfo.GroupUnify = true
-
-	if src.ClosedRecursive {
-		if ctx.Version == internal.EvalV2 {
-			var root adt.CloseInfo
-			c.CloseInfo = root.SpawnRef(src, src.ClosedRecursive, nil)
-		} else {
-			c.CloseInfo.FromDef = true
-		}
-	}
-	dst.AddConjunct(c)
-}
-
 // Unify reports the greatest lower bound of v and w.
 //
 // Value v and w must be obtained from the same build.
@@ -1732,20 +1718,14 @@ func (v Value) Unify(w Value) Value {
 	}
 
 	ctx := v.ctx()
-	n := &adt.Vertex{}
-	addConjuncts(ctx, n, v.v)
-	addConjuncts(ctx, n, w.v)
+	defer ctx.PopArc(ctx.PushArc(v.v))
 
-	n.Finalize(ctx)
+	n := adt.Unify(ctx, v.v, w.v)
 
-	n.Parent = v.v.Parent
-	n.Label = v.v.Label
-	n.ClosedRecursive = v.v.ClosedRecursive || w.v.ClosedRecursive
-
-	if err := n.Err(ctx); err != nil {
-		return makeValue(v.idx, n, v.parent_)
-	}
 	if ctx.Version == internal.EvalV2 {
+		if err := n.Err(ctx); err != nil {
+			return makeValue(v.idx, n, v.parent_)
+		}
 		if err := allowed(ctx, v.v, n); err != nil {
 			return newErrValue(w, err)
 		}

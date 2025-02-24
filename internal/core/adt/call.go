@@ -69,9 +69,28 @@ func (c *CallContext) Args() []Value {
 	return c.args
 }
 
-// Exprs return the unevaluated argument expressions. This function is only used
-// for transitioning and will be removed at some point. Use [CallContext.Expr]
-// instead. (TODO)
-func (c *CallContext) Exprs() []Expr {
-	return c.call.Args
+// Expr returns the nth argument expression. The value is evaluated and any
+// cycle information is accumulated in the context. This allows cycles in
+// arguments to be detected.
+//
+// This method of getting an argument should be used when the argument is used
+// as a schema and may contain cycles.
+func (c *CallContext) Expr(i int) Value {
+	// If the call context represents a validator call, the argument will be
+	// offset by 1.
+	if c.isValidator {
+		if i == 0 {
+			c.Errf("Expr may not be called for 0th argument of validator")
+			return nil
+		}
+		i--
+	}
+	x := c.call.Args[i]
+
+	// Evaluated while keeping any cycle information in the context.
+	return c.ctx.EvaluateKeepState(x)
+}
+
+func (c *CallContext) Errf(format string, args ...interface{}) *Bottom {
+	return c.ctx.NewErrf(format, args...)
 }

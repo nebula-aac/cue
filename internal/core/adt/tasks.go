@@ -57,7 +57,7 @@ func init() {
 	handleComprehension = &runner{
 		name:      "Comprehension",
 		f:         processComprehension,
-		completes: valueKnown | allTasksCompleted | fieldConjunctsKnown,
+		completes: valueKnown | allTasksCompleted | fieldConjunctsKnown | pendingKnown,
 	}
 	handleListLit = &runner{
 		name:      "ListLit",
@@ -101,7 +101,7 @@ func processResolver(ctx *OpContext, t *task, mode runMode) {
 	// be conclusive, we could avoid triggering evaluating disjunctions. This
 	// would be a pretty significant rework, though.
 
-	arc := r.resolve(ctx, oldOnly(0))
+	arc := r.resolve(ctx, combineMode(fieldSetKnown, mode))
 	// TODO: ensure that resolve always returns one of these two.
 	if arc == nil || arc == emptyNode {
 		// TODO: yield instead?
@@ -172,8 +172,6 @@ func processDynamic(ctx *OpContext, t *task, mode runMode) {
 	ci := t.id
 
 	c := MakeConjunct(t.env, field, ci)
-	// TODO(evalv3): this does not seem to be necessary and even treacherous.
-	c.CloseInfo.cc = nil
 	n.insertArc(f, field.ArcType, c, ci, true)
 }
 

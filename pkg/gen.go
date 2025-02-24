@@ -14,13 +14,6 @@
 
 //go:build ignore
 
-// Since our go.mod still has 'go 1.22', but we want to use go/types.Alias
-// to differentiate cue.Value from pkg.Schema, we enable it explicitly.
-// TODO(mvdan): this can be removed once we bump go.mod to 'go 1.23';
-// at which point packages.NeedSyntax below can be removed as well
-// as we no longer need to force go/packages to typecheck with our GODEBUG setting.
-//go:debug gotypesalias=1
-
 // gen.go generates the pkg.go files inside the packages under the pkg directory.
 //
 // It takes the list of packages from the packages.txt.
@@ -92,7 +85,7 @@ func main() {
 	log.SetFlags(log.Lshortfile)
 	log.SetOutput(os.Stdout)
 
-	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedFiles | packages.NeedTypes | packages.NeedSyntax}
+	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedFiles | packages.NeedTypes}
 	pkgs, err := packages.Load(cfg, "./...")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load: %v\n", err)
@@ -338,12 +331,17 @@ func (g *generator) genFunc(fn *types.Func) {
 
 	fmt.Fprintf(g.w, "Name: %q,\n", fn.Name())
 
+	needCallContext := false
 	args := []string{}
 	vals := []string{}
 	kind := []string{}
 	for i := 0; i < params.Len(); i++ {
 		param := params.At(i)
-		methodName := g.callCtxtGetter(param.Type())
+		typ := param.Type()
+		if typ.String() == "cuelang.org/go/internal/pkg.Schema" {
+			needCallContext = true
+		}
+		methodName := g.callCtxtGetter(typ)
 		argKind := g.adtKind(param.Type())
 		vals = append(vals, fmt.Sprintf("c.%s(%d)", methodName, len(args)))
 		args = append(args, param.Name())
@@ -368,6 +366,17 @@ func (g *generator) genFunc(fn *types.Func) {
 		init = fmt.Sprintf("%s := %s", argList, valList)
 	}
 
+	name := fn.Name()
+	if needCallContext {
+		argList = "c.OpContext(), " + argList
+
+		// Main function is used for Godoc documentation. Once we have proper
+		// CUE function signatures, we can remove these stubs.
+		// NOTE: this will not work for scripts that are not cased. But this
+		// is intended to be a temporary situation anyway.
+		name = strings.ToLower(name[:1]) + name[1:]
+	}
+
 	fmt.Fprintf(g.w, "Func: func(c *pkg.CallCtxt) {")
 	defer fmt.Fprintln(g.w, "},")
 	fmt.Fprintln(g.w)
@@ -377,9 +386,9 @@ func (g *generator) genFunc(fn *types.Func) {
 	fmt.Fprintln(g.w, "if c.Do() {")
 	defer fmt.Fprintln(g.w, "}")
 	if results.Len() == 1 {
-		fmt.Fprintf(g.w, "c.Ret = %s(%s)", fn.Name(), argList)
+		fmt.Fprintf(g.w, "c.Ret = %s(%s)", name, argList)
 	} else {
-		fmt.Fprintf(g.w, "c.Ret, c.Err = %s(%s)", fn.Name(), argList)
+		fmt.Fprintf(g.w, "c.Ret, c.Err = %s(%s)", name, argList)
 	}
 }
 

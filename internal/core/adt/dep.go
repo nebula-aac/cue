@@ -147,6 +147,10 @@ type ccDepRef struct {
 
 // addArc adds a dependent arc to c. If child is an arc, child.src == key
 func (c *closeContext) addArcDependency(ctx *OpContext, matched bool, child *closeContext) {
+	if f := child.src.Label; f.IsLet() || f == InvalidLabel {
+		return
+	}
+
 	root := child.src.cc()
 
 	// NOTE: do not increment
@@ -341,6 +345,8 @@ func (n *nodeContext) breakIncomingDeps(mode runMode) {
 	if mode != finalize {
 		return
 	}
+
+	defer n.ctx.Un(n.ctx.Indentf(n.node, "(%v)", mode))
 
 	// TODO: remove this block in favor of finalizing notification nodes,
 	// or what have you. We have patched this to skip evaluating when using

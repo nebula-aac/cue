@@ -118,11 +118,9 @@ var andBuiltin = &adt.Builtin{
 	Result: adt.IntKind,
 	RawFunc: func(call *adt.CallContext) adt.Value {
 		c := call.OpContext()
-		args := call.Exprs()
+		arg := call.Expr(0)
 
-		// Pass through the cycle information from evaluating the first argument.
-		v := c.EvaluateKeepState(args[0])
-		list := c.RawElems(v)
+		list := c.RawElems(arg)
 		if len(list) == 0 {
 			return &adt.Top{}
 		}

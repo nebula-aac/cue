@@ -122,12 +122,7 @@ func (n *nodeContext) scheduleConjuncts() {
 // TODO(evalv3): consider not returning a result at all.
 func (v *Vertex) unify(c *OpContext, needs condition, mode runMode) bool {
 	if c.LogEval > 0 {
-		c.Logf(v, "Unify %v", fmt.Sprintf("%p", v))
-		c.nest++
-		defer func() {
-			c.nest--
-			c.Logf(v, "END Unify")
-		}()
+		defer c.Un(c.Indentf(v, "UNIFY(%x, %v)", needs, mode))
 	}
 
 	// TODO: investigate whether we still need this mechanism.
@@ -167,7 +162,9 @@ func (v *Vertex) unify(c *OpContext, needs condition, mode runMode) bool {
 	if n == nil {
 		return true // already completed
 	}
-	defer n.free()
+	// TODO(perf): reintroduce freeing once we have the lifetime under control.
+	// Right now this is not managed anyway, so we prevent bugs by disabling it.
+	// defer n.free()
 
 	// Typically a node processes all conjuncts before processing its fields.
 	// So this condition is very likely to trigger. If for some reason the
@@ -199,11 +196,18 @@ func (v *Vertex) unify(c *OpContext, needs condition, mode runMode) bool {
 	// through an expression. As long as there is no request to process arcs or
 	// finalize the value, we can and should stop processing here to avoid
 	// spurious cycles.
-	if v.status == evaluating &&
-		v.state.evalDepth == c.evalDepth &&
-		needs&fieldSetKnown == 0 &&
-		mode != finalize {
-		return false
+
+	if v.status == evaluating && v.state.evalDepth == c.evalDepth {
+		switch mode {
+		case finalize:
+			// We will force completion below.
+		case yield:
+			// TODO: perhaps add to queue in some condition.
+		default:
+			if needs&fieldSetKnown == 0 {
+				return false
+			}
+		}
 	}
 
 	v.status = evaluating
@@ -219,7 +223,9 @@ func (v *Vertex) unify(c *OpContext, needs condition, mode runMode) bool {
 				a.unify(c, needs, attemptOnly)
 			}
 		}
+		n.completePending(mode)
 	}
+
 	n.process(nodeOnlyNeeds, mode)
 
 	defer c.PopArc(c.PushArc(v))
@@ -266,7 +272,7 @@ func (v *Vertex) unify(c *OpContext, needs condition, mode runMode) bool {
 	}
 
 	if n.node.Label.IsLet() || n.meets(allAncestorsProcessed) {
-		if cc := v.rootCloseContext(n.ctx); !cc.isDecremented { // TODO: use v.cc
+		if cc := v.getRootCloseContext(n.ctx); !cc.isDecremented {
 			cc.decDependent(c, ROOT, nil) // REF(decrement:nodeDone)
 			cc.isDecremented = true
 		}
@@ -293,6 +299,14 @@ func (v *Vertex) unify(c *OpContext, needs condition, mode runMode) bool {
 		switch {
 		case assertStructuralCycleV3(n):
 			n.breakIncomingDeps(mode)
+
+		case n.node.status == finalized:
+			// There is no need to recursively process if the node is already
+			// finalized. This can happen if there was an error, for instance.
+			// This may drop a structural cycle error, but as long as the node
+			// already is erroneous, that is fine. It is probably possible to
+			// skip more processing if the node is already finalized.
+
 		// TODO: consider bailing on error if n.errs != nil.
 		case n.completeAllArcs(needs, mode):
 		}
@@ -414,8 +428,6 @@ func (v *Vertex) unify(c *OpContext, needs condition, mode runMode) bool {
 
 		n.node.updateStatus(finalized)
 
-		defer n.unmarkOptional(n.markOptional())
-
 		if DebugDeps {
 			switch n.node.BaseValue.(type) {
 			case *Disjunction:
@@ -454,6 +466,8 @@ func (v *Vertex) unify(c *OpContext, needs condition, mode runMode) bool {
 // NOT:
 // - complete value. That is reserved for Unify.
 func (n *nodeContext) completeNodeTasks(mode runMode) {
+	defer n.ctx.Un(n.ctx.Indentf(n.node, "(%v)", mode))
+
 	n.assertInitialized()
 
 	if n.isCompleting > 0 {
@@ -465,14 +479,6 @@ func (n *nodeContext) completeNodeTasks(mode runMode) {
 	}()
 
 	v := n.node
-	c := n.ctx
-
-	if n.ctx.LogEval > 0 {
-		c.nest++
-		defer func() {
-			c.nest--
-		}()
-	}
 
 	if !v.Label.IsLet() {
 		if p := v.Parent; p != nil && p.state != nil {
@@ -508,7 +514,7 @@ func (n *nodeContext) completeNodeTasks(mode runMode) {
 	// At this point, no more conjuncts will be added, so we could decrement
 	// the notification counters.
 
-	if cc := v.rootCloseContext(n.ctx); !cc.isDecremented { // TODO: use v.cc
+	if cc := v.getRootCloseContext(n.ctx); !cc.isDecremented {
 		cc.isDecremented = true
 
 		cc.decDependent(n.ctx, ROOT, nil) // REF(decrement:nodeDone)
@@ -677,6 +683,39 @@ func (n *nodeContext) completeAllArcs(needs condition, mode runMode) bool {
 	return success
 }
 
+// completePending determines if n is pending. In order to do so, it must
+// recursively find any descendents with unresolved comprehensions. Note that
+// it is currently possible for arcs with unresolved comprehensions to not be
+// marked as pending. Consider this example (from issue 3708):
+//
+//	out: people.bob.kind
+//	people: [string]: {
+//		kind:  "person"
+//		name?: string
+//	}
+//	if true {
+//		people: bob: name: "Bob"
+//	}
+//
+// In this case, the pattern constraint inserts fields into 'bob', which then
+// marks 'name' as not pending. However, for 'people' to become non-pending,
+// the comprehension associated with field 'name' still needs to be evaluated.
+//
+// For this reason, this method does not check whether 'n' is pending.
+//
+// TODO(evalv4): consider making pending not an arc state, but rather a
+// separate mode. This will allow us to descend with more precision to only
+// visit arcs that still need to be resolved.
+func (n *nodeContext) completePending(mode runMode) {
+	for _, a := range n.node.Arcs {
+		state := a.getState(n.ctx)
+		if state != nil {
+			state.completePending(mode)
+		}
+	}
+	n.process(pendingKnown, mode)
+}
+
 func (n *nodeContext) evalArcTypes(mode runMode) {
 	for _, a := range n.node.Arcs {
 		if a.ArcType != ArcPending {
@@ -769,32 +808,26 @@ func (v *Vertex) lookup(c *OpContext, pos token.Pos, f Feature, flags combinedFl
 		return nil
 
 	default:
+		if runMode == finalize && v.status == evaluating {
+			err := c.NewPosf(pos, "cycle error referencing %v", f)
+			c.AddBottom(&Bottom{
+				Code: CycleError,
+				Err:  err,
+				Node: arc,
+			})
+			return nil
+		}
 		arc = &Vertex{Parent: state.node, Label: f, ArcType: ArcPending}
 		v.Arcs = append(v.Arcs, arc)
 		arcState = arc.getState(c) // TODO: consider using getBareState.
 	}
 
 	if arcState != nil && (!arcState.meets(needTasksDone) || !arcState.meets(arcTypeKnown)) {
-		needs |= arcTypeKnown
-		// If this arc is not ArcMember, which it is not at this point,
-		// any pending arcs could influence the field set.
-		for _, a := range arc.Arcs {
-			if a.ArcType == ArcPending {
-				needs |= fieldSetKnown
-				break
-			}
-		}
+		arcState.completePending(attemptOnly)
+
 		arcState.completeNodeTasks(yield)
 
-		// Child nodes, if pending and derived from a comprehension, may
-		// still cause this arc to become not pending.
-		if arc.ArcType != ArcMember {
-			for _, a := range arcState.node.Arcs {
-				if a.ArcType == ArcPending {
-					a.unify(c, arcTypeKnown, runMode)
-				}
-			}
-		}
+		needs |= arcTypeKnown
 
 		switch runMode {
 		case ignore, attemptOnly:

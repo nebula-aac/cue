@@ -24,7 +24,7 @@ import (
 	"net/url"
 	"regexp"
 	"regexp/syntax"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -527,10 +527,6 @@ func (s *state) object(n cue.Value) *ast.StructLit {
 	if s.obj == nil {
 		s.obj = &ast.StructLit{}
 		s.objN = n
-
-		if s.id != nil {
-			s.obj.Elts = append(s.obj.Elts, s.idTag())
-		}
 	}
 	return s.obj
 }
@@ -589,13 +585,17 @@ func (s *state) finalize() (e ast.Expr) {
 	disjuncts := []ast.Expr{}
 
 	// Sort literal structs and list last for nicer formatting.
-	sort.SliceStable(s.types[arrayType].constraints, func(i, j int) bool {
-		_, ok := s.types[arrayType].constraints[i].(*ast.ListLit)
-		return !ok
+	// Use a stable sort so that the relative order of constraints
+	// is otherwise kept as-is, for the sake of deterministic output.
+	slices.SortStableFunc(s.types[arrayType].constraints, func(a, b ast.Expr) int {
+		_, aList := a.(*ast.ListLit)
+		_, bList := b.(*ast.ListLit)
+		return cmpBool(aList, bList)
 	})
-	sort.SliceStable(s.types[objectType].constraints, func(i, j int) bool {
-		_, ok := s.types[objectType].constraints[i].(*ast.StructLit)
-		return !ok
+	slices.SortStableFunc(s.types[objectType].constraints, func(a, b ast.Expr) int {
+		_, aStruct := a.(*ast.StructLit)
+		_, bStruct := b.(*ast.StructLit)
+		return cmpBool(aStruct, bStruct)
 	})
 
 	type excludeInfo struct {
@@ -690,8 +690,8 @@ func (s *state) finalize() (e ast.Expr) {
 		}
 	}
 
-	// If an "$id" exists and has not been included in any object constraints
-	if s.id != nil && s.obj == nil {
+	// If an "$id" exists, make sure it's present in the output.
+	if s.id != nil {
 		if st, ok := e.(*ast.StructLit); ok {
 			st.Elts = append([]ast.Decl{s.idTag()}, st.Elts...)
 		} else {
@@ -704,6 +704,24 @@ func (s *state) finalize() (e ast.Expr) {
 	// need to be mentioned again.
 	s.knownTypes = s.allowedTypes
 	return e
+}
+
+// cmpBool returns
+//
+//	-1 if x is less than y,
+//	 0 if x equals y,
+//	+1 if x is greater than y,
+//
+// where false is ordered before true.
+func cmpBool(x, y bool) int {
+	switch {
+	case !x && y:
+		return -1
+	case x && !y:
+		return +1
+	default:
+		return 0
+	}
 }
 
 func (s schemaInfo) comment() *ast.CommentGroup {

@@ -368,13 +368,9 @@ func (s *scheduler) process(needs condition, mode runMode) bool {
 	}
 
 	if s.ctx.LogEval > 0 && len(s.tasks) > 0 {
+
 		if v := s.tasks[0].node.node; v != nil {
-			c.Logf(v, "START Process %v -- mode: %v", v.Label, mode)
-			c.nest++
-			defer func() {
-				c.nest--
-				c.Logf(v, "END Process")
-			}()
+			c.Logf(v, "PROCESS(%v)", mode)
 		}
 	}
 
@@ -430,6 +426,10 @@ unblockTasks:
 	// formerly blocked tasks to become unblocked. To ensure that unblocking
 	// tasks do not happen in an order-dependent way, we want to ensure that we
 	// have unblocked all tasks from one phase, before commencing to the next.
+
+	if c.inDisjunct > 0 {
+		return true
+	}
 
 	// The types of the node can no longer be altered. We can unblock the
 	// relevant states first to finish up any tasks that were just waiting for
@@ -665,8 +665,8 @@ func runTask(t *task, mode runMode) {
 		}
 		return
 	}
-	t.node.Logf("============ RUNTASK %v %v", t.run.name, t.x)
 	ctx := t.node.ctx
+	defer ctx.Un(ctx.Indentf(t.node.node, "RUNTASK(%v, %v)", t.run.name, t.x))
 
 	switch t.state {
 	case taskSUCCESS, taskFAILED:

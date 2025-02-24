@@ -21,6 +21,7 @@ import (
 	"cuelang.org/go/cue/ast"
 	"cuelang.org/go/cue/errors"
 	"cuelang.org/go/cue/token"
+	"cuelang.org/go/internal"
 )
 
 // TODO: unanswered questions about structural cycles:
@@ -307,22 +308,45 @@ func (v *Vertex) cc() *closeContext {
 	return v._cc
 }
 
+func (v *Vertex) getRootCloseContext(ctx *OpContext) *closeContext {
+	_ = ctx // suppress linter
+	if v._cc == nil {
+		panic("no closeContext")
+	}
+	return v._cc
+}
+
 // rootCloseContext creates a closeContext for this Vertex or returns the
 // existing one.
 func (v *Vertex) rootCloseContext(ctx *OpContext) *closeContext {
-	if v._cc == nil {
-		v._cc = &closeContext{
-			group:           &v.Conjuncts,
-			parent:          nil,
-			src:             v,
-			parentConjuncts: v,
-			decl:            v,
-		}
-		v._cc.incDependent(ctx, ROOT, nil) // matched in REF(decrement:nodeDone)
+	mode := v.ArcType
+	if v._cc != nil {
+		v._cc.updateArcType(ctx, mode)
+		return v._cc
+	}
+
+	v._cc = &closeContext{
+		group:           &v.Conjuncts,
+		parent:          nil,
+		src:             v,
+		parentConjuncts: v,
+		decl:            v,
+		arcType:         mode,
+	}
+	v._cc.incDependent(ctx, ROOT, nil) // matched in REF(decrement:nodeDone)
+
+	if f := v.Label; f.IsLet() || f == InvalidLabel {
+		return v._cc
 	}
 
 	if p := v.Parent; p != nil {
 		pcc := p.rootCloseContext(ctx)
+
+		if pcc.isClosed {
+			pcc.checkAllowsCC(ctx, v._cc)
+		}
+
+		pcc.addArcDependency(ctx, false, v._cc)
 		v._cc.depth = pcc.depth + 1
 	}
 
@@ -451,6 +475,9 @@ const (
 	// its conjuncts need to be processed to find out. This happens when an arc
 	// is provisionally added as part of a comprehension, but when this
 	// comprehension has not yet yielded any results.
+	//
+	// TODO: make this a separate state so that we can track which arcs still
+	// have unresolved comprehensions.
 	ArcPending
 
 	// ArcNotPresent indicates that this arc is not present and, unlike
@@ -591,6 +618,11 @@ const (
 	// evaluated. If this is encountered it indicates a structural cycle.
 	// Value does not have to be nil
 	evaluatingArcs
+
+	// TODO: introduce a "frozen" state. Right now a node may marked and used
+	// as finalized, before all tasks have completed. We should introduce a
+	// frozen state that simply checks that all remaining tasks are idempotent
+	// and errors if they are not.
 
 	// finalized means that this node is fully evaluated and that the results
 	// are save to use without further consideration.
@@ -956,16 +988,21 @@ func (v *Vertex) Bottom() *Bottom {
 // func (v *Vertex) Evaluate()
 
 // Unify unifies two values and returns the result.
+//
+// TODO: introduce: Open() wrapper that indicates closedness should be ignored.
+//
+// Change Value to Node to allow any kind of type to be passed.
 func Unify(c *OpContext, a, b Value) *Vertex {
+	v := &Vertex{}
+
 	// We set the parent of the context to be able to detect structural cycles
 	// early enough to error on schemas used for validation.
-	v := &Vertex{
-		Parent: c.vertex,
+	if n := c.vertex; n != nil {
+		v.Parent = n.Parent
 	}
 
-	closeInfo := c.CloseInfo()
-	v.AddConjunct(MakeConjunct(nil, a, closeInfo))
-	v.AddConjunct(MakeConjunct(nil, b, closeInfo))
+	addConjuncts(c, v, a)
+	addConjuncts(c, v, b)
 
 	if c.isDevVersion() {
 		s := v.getState(c)
@@ -975,7 +1012,29 @@ func Unify(c *OpContext, a, b Value) *Vertex {
 	}
 
 	v.Finalize(c)
+
+	if c.vertex != nil {
+		v.Label = c.vertex.Label
+	}
+
 	return v
+}
+
+func addConjuncts(ctx *OpContext, dst *Vertex, src Value) {
+	closeInfo := ctx.CloseInfo()
+	closeInfo.FromDef = false
+	c := MakeConjunct(nil, src, closeInfo)
+
+	if v, ok := src.(*Vertex); ok && v.ClosedRecursive {
+		if ctx.Version == internal.EvalV2 {
+			var root CloseInfo
+			c.CloseInfo = root.SpawnRef(v, v.ClosedRecursive, nil)
+		} else {
+			c.CloseInfo.FromDef = true
+		}
+	}
+
+	dst.AddConjunct(c)
 }
 
 func (v *Vertex) Finalize(c *OpContext) {

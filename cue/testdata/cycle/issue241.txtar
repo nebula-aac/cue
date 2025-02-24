@@ -37,11 +37,12 @@ Disjuncts:    47
 (struct){
   #Value: (int){ |((int){ 0 }, (int){ 1 }) }
   foo: (_|_){
-    // [cycle] cycle error
+    // [cycle] foo: cycle across unresolved disjunction referenced by bar:
+    //     ./in.cue:1:13
+    //     ./in.cue:5:6
+    //     ./in.cue:6:6
   }
-  bar: (_|_){
-    // [cycle] cycle error
-  }
+  bar: (int){ |((int){ 0 }, (int){ 1 }) }
   Foo: (int){ 1 }
   Bar: (int){ 0 }
   cell: (struct){
@@ -55,22 +56,19 @@ Disjuncts:    47
 diff old new
 --- old
 +++ new
-@@ -1,10 +1,11 @@
+@@ -1,8 +1,10 @@
  (struct){
    #Value: (int){ |((int){ 0 }, (int){ 1 }) }
    foo: (_|_){
 -    // [incomplete] foo: unresolved disjunction 0 | 1 (type int):
 -    //     ./in.cue:4:6
--  }
--  bar: (int){ |((int){ 0 }, (int){ 1 }) }
-+    // [cycle] cycle error
-+  }
-+  bar: (_|_){
-+    // [cycle] cycle error
-+  }
++    // [cycle] foo: cycle across unresolved disjunction referenced by bar:
++    //     ./in.cue:1:13
++    //     ./in.cue:5:6
++    //     ./in.cue:6:6
+   }
+   bar: (int){ |((int){ 0 }, (int){ 1 }) }
    Foo: (int){ 1 }
-   Bar: (int){ 0 }
-   cell: (struct){
 -- diff/explanation --
 error is now symmetric
 -- out/eval --

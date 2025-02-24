@@ -79,16 +79,23 @@ func (n *nodeContext) scheduleConjunct(c Conjunct, id CloseInfo) {
 		var t closeNodeType
 		if c.CloseInfo.FromDef {
 			t |= closeDef
+			c.CloseInfo.FromDef = false
+			id.FromDef = false
 		}
 		// NOTE: the check for OpenInline is not strictly necessary, but it
 		// clarifies that using id.FromEmbed is not used when OpenInline is not
 		// used.
 		if c.CloseInfo.FromEmbed || (n.ctx.OpenInline && id.FromEmbed) {
 			t |= closeEmbed
+			if !n.ctx.OpenInline {
+				c.CloseInfo.FromEmbed = false
+				id.FromEmbed = false
+			}
 		}
-		if t != 0 || c.CloseInfo.GroupUnify {
+		if t != 0 {
 			id, _ = id.spawnCloseContext(n.ctx, t)
 		}
+
 		if !id.cc.done {
 			id.cc.incDependent(n.ctx, DEFER, nil)
 			defer id.cc.decDependent(n.ctx, DEFER, nil)
@@ -271,6 +278,8 @@ func (n *nodeContext) scheduleStruct(env *Environment,
 	hasEmbed := false
 	hasEllipsis := false
 
+	ci.cc.hasStruct = true
+
 	// TODO: do we still need this?
 	// shouldClose := ci.cc.isDef || ci.cc.isClosedOnce
 
@@ -281,18 +290,8 @@ func (n *nodeContext) scheduleStruct(env *Environment,
 	parent.Disable = true // disable until processing is done.
 	ci.IsClosed = false
 
-	// TODO: precompile
-loop1:
-	for _, d := range s.Decls {
-		switch d.(type) {
-		case *Ellipsis:
-			hasEllipsis = true
-			break loop1
-		}
-	}
-
 	// TODO(perf): precompile whether struct has embedding.
-loop2:
+loop1:
 	for _, d := range s.Decls {
 		switch d.(type) {
 		case *Comprehension, Expr:
@@ -313,7 +312,7 @@ loop2:
 			// Note: adding a count is not needed here, as there will be an
 			// embed spawn below.
 			hasEmbed = true
-			break loop2
+			break loop1
 		}
 	}
 
@@ -348,9 +347,7 @@ loop2:
 
 		case *Ellipsis:
 			// Can be added unconditionally to patterns.
-			ci.cc.isDef = false
-			ci.cc.isClosed = false
-			ci.cc.isDefOrig = false
+			hasEllipsis = true
 
 		case *DynamicField:
 			if x.ArcType == ArcMember {
@@ -386,7 +383,6 @@ loop2:
 	if !hasEmbed {
 		n.aStruct = s
 		n.aStructID = ci
-		ci.cc.hasNonTop = true
 	}
 
 	// TODO: probably no longer necessary.
@@ -521,6 +517,9 @@ func (n *nodeContext) insertAndSkipConjuncts(c Conjunct, id CloseInfo, depth int
 	}
 
 	if c.CloseInfo.cc.depth <= depth {
+		// Now we do not clone the closeContext, set FromDef to false if
+		// the depth is smaller.
+		c.CloseInfo.FromDef = false
 		if x, ok := c.Elem().(*ConjunctGroup); ok {
 			for _, c := range *x {
 				n.insertAndSkipConjuncts(c, id, depth)
@@ -651,12 +650,10 @@ func (n *nodeContext) insertValueConjunct(env *Environment, v Value, id CloseInf
 			n.unshare()
 			return
 		}
-		id.cc.hasNonTop = true
 		n.addBottom(x)
 		return
 
 	case *Builtin:
-		id.cc.hasNonTop = true
 		if v := x.BareValidator(); v != nil {
 			n.insertValueConjunct(env, v, id)
 			return
@@ -710,12 +707,9 @@ func (n *nodeContext) insertValueConjunct(env *Environment, v Value, id CloseInf
 	case *BasicType:
 		n.updateCyclicStatusV3(id)
 
-		id.cc.hasNonTop = true
-
 	case *BoundValue:
 		n.updateCyclicStatusV3(id)
 
-		id.cc.hasNonTop = true
 		switch x.Op {
 		case LessThanOp, LessEqualOp:
 			if y := n.upperBound; y != nil {
@@ -778,12 +772,20 @@ func (n *nodeContext) insertValueConjunct(env *Environment, v Value, id CloseInf
 		// only associated with a validator, we leave it to the validator to
 		// decide what fields are allowed.
 		if kind&(ListKind|StructKind) != 0 {
+			if b, ok := x.(*BuiltinValidator); ok && b.Builtin.NonConcrete {
+				id.cc.hasOpenValidator = true
+			}
 			id.cc.hasTop = true
 		}
 
 		for i, y := range n.checks {
 			if b, ok := SimplifyValidator(ctx, cx, y); ok {
-				n.checks[i] = b
+				// It is possible that simplification process triggered further
+				// evaluation, finalizing this node and clearing the checks
+				// slice. In that case it is safe to ignore the result.
+				if len(n.checks) > 0 {
+					n.checks[i] = b
+				}
 				return
 			}
 		}

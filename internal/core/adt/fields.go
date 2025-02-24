@@ -221,8 +221,14 @@ type closeContext struct {
 	// hasTop indicates a node has at least one top conjunct.
 	hasTop bool
 
-	// hasNonTop indicates a node has at least one conjunct that is not top.
-	hasNonTop bool
+	// hasStruct indicates that a node has at least one struct conjunct.
+	hasStruct bool
+
+	// hasOpenValidator indicates that a node has at least one validator that
+	// takes a schema as an argument. In such cases we make an exception and
+	// disable closedness checking.
+	// TODO(closedness): remove this discrepancy as part of a closedness redesign.
+	hasOpenValidator bool
 
 	// isClosedOnce is true if this closeContext is the result of calling the
 	// close builtin.
@@ -554,7 +560,17 @@ func (c CloseInfo) spawnCloseContext(ctx *OpContext, t closeNodeType) (CloseInfo
 func (c *closeContext) updateClosedInfo(ctx *OpContext) bool {
 	p := c.parent
 
-	if c.isDef && !c.isTotal && (!c.hasTop || c.hasNonTop) {
+	// A _ blocks close.
+	blockClose := c.hasTop
+	// Unless it is unified with a struct.
+	if c.hasStruct {
+		blockClose = false
+	}
+	// Unless, in turn, it is openend by a validator.
+	if c.hasOpenValidator {
+		blockClose = true
+	}
+	if c.isDef && !c.isTotal && !blockClose {
 		c.isClosed = true
 		if p != nil {
 			p.isDef = true
@@ -588,9 +604,13 @@ func (c *closeContext) updateClosedInfo(ctx *OpContext) bool {
 	if c.hasTop {
 		p.hasTop = true
 	}
-	if c.hasNonTop {
-		p.hasNonTop = true
+	if c.hasOpenValidator {
+		p.hasOpenValidator = true
 	}
+	// NOTE: we should not pass up hasStruct: this flag is used to "close" a
+	// top that belongs to a single closeContext. This then sets isClosed, which
+	// itself is passed up the parent tree. Passing up hasStruct itself will
+	// have the effect of also closing tops that belong to other closeContexts.
 
 	switch {
 	case c.isTotal:
@@ -889,19 +909,7 @@ func isTotal(p Value) bool {
 // this is not the case.
 func injectClosed(ctx *OpContext, closed, dst *closeContext) {
 	for _, a := range dst.arcs {
-		ca := a.dst
-		switch f := ca.Label(); {
-		case ca.src.ArcType == ArcOptional,
-			// Without this continue, an evaluation error may be propagated to
-			// parent nodes that are otherwise allowed.
-			// TODO(evalv3): consider using ca.arcType instead.
-			allowedInClosed(f),
-			closed.allows(ctx, f):
-		case ca.arcType == ArcPending:
-			ca.arcType = ArcNotPresent
-		default:
-			ctx.notAllowedError(ca.src)
-		}
+		closed.checkAllowsCC(ctx, a.dst)
 	}
 
 	if !dst.isClosed {
@@ -914,11 +922,29 @@ func injectClosed(ctx *OpContext, closed, dst *closeContext) {
 		dst.Patterns = closed.Patterns
 
 		dst.isClosed = true
+		dst.isTotal = false
+	}
+}
+
+func (c *closeContext) checkAllowsCC(ctx *OpContext, arc *closeContext) {
+	switch f := arc.Label(); {
+	case arc.src.ArcType == ArcOptional,
+		// Without this continue, an evaluation error may be propagated to
+		// parent nodes that are otherwise allowed.
+		// TODO(evalv3): consider using ca.arcType instead.
+		allowedInClosed(f),
+		c.allows(ctx, f):
+	case arc.arcType == ArcPending:
+		arc.arcType = ArcNotPresent
+	default:
+		ctx.notAllowedError(arc.src)
 	}
 }
 
 func (c *closeContext) allows(ctx *OpContext, f Feature) bool {
-	ctx.Assertf(token.NoPos, c.conjunctCount == 0, "unexpected 0 conjunctCount")
+	// Either a closeConext was completed, or it was already determined that
+	// it is closed.
+	ctx.Assertf(token.NoPos, c.done || c.isClosed, "unexpected unfinished conjunct")
 
 	for _, b := range c.arcs {
 		cb := b.dst

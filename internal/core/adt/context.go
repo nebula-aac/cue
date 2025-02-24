@@ -202,11 +202,6 @@ func (n *nodeContext) skipNonMonotonicChecks() bool {
 	return n.ctx.inDisjunct > 0
 }
 
-// Impl is for internal use only. This will go.
-func (c *OpContext) Impl() Runtime {
-	return c.Runtime
-}
-
 func (c *OpContext) Pos() token.Pos {
 	if c.src == nil {
 		return token.NoPos
@@ -461,13 +456,16 @@ func (c *OpContext) Validate(check Conjunct, value Value) *Bottom {
 
 	src := c.src
 	ci := c.ci
+	env := c.e
 	c.src = check.Source()
 	c.ci = check.CloseInfo
+	c.e = check.Env
 
 	err := check.x.(Validator).validate(c, value)
 
 	c.src = src
 	c.ci = ci
+	c.e = env
 
 	return err
 }
@@ -565,7 +563,7 @@ func (c *OpContext) Evaluate(env *Environment, x Expr) (result Value, complete b
 	return val, true
 }
 
-// EvaluateKeepState does an evaluate, but leaves any errors an cycle info
+// EvaluateKeepState does an evaluate, but leaves any errors and cycle info
 // within the context.
 func (c *OpContext) EvaluateKeepState(x Expr) (result Value) {
 	src := c.src
@@ -676,6 +674,7 @@ func (c *OpContext) evalStateCI(v Expr, state combinedFlags) (result Value, ci C
 		if arc == nil {
 			return nil, c.ci
 		}
+		orig := arc
 		// TODO(deref): what is the right level of dereferencing here?
 		// DerefValue seems to work too.
 		arc = arc.DerefNonShared()
@@ -700,34 +699,50 @@ func (c *OpContext) evalStateCI(v Expr, state combinedFlags) (result Value, ci C
 
 		if c.isDevVersion() {
 			if s := arc.getState(c); s != nil {
-				needs := state.conditions() | arcTypeKnown
+				origNeeds := state.conditions()
+				needs := origNeeds | arcTypeKnown
 				runMode := state.runMode()
 
-				if runMode == finalize {
+				switch runMode {
+				case finalize:
 					arc.unify(c, needs, attemptOnly) // to set scalar
 					arc.state.freeze(needs)
-				} else {
-					arc.unify(c, needs, runMode) // to set scalar
-				}
+				case attemptOnly:
+					arc.unify(c, needs, attemptOnly) // to set scalar
 
-				v := arc
-				if v.ArcType == ArcPending {
-					if v.status == evaluating {
-						for ; v.Parent != nil && v.ArcType == ArcPending; v = v.Parent {
+				case yield:
+					arc.unify(c, needs, runMode) // to set scalar
+
+					evaluating := arc.status == evaluating
+
+					// We cannot resolve a value that represents an unresolved
+					// disjunction.
+					if evaluating && orig != arc && arc.IsDisjunct {
+						task := c.current()
+						if origNeeds == scalarKnown && !orig.state.meets(scalarKnown) {
+							orig.state.defaultAttemptInCycle = task.node.node
+							task.waitFor(&orig.state.scheduler, needs)
+							s.yield()
+							panic("unreachable")
 						}
-						err := c.Newf("cycle with field %v", x)
+						err := c.Newf("unresolved disjunction: %v", x)
 						b := &Bottom{Code: CycleError, Err: err}
-						s.setBaseValue(b)
 						return b, c.ci
-						// TODO: use this instead, as is usual for incomplete errors,
-						// and also move this block one scope up to also apply to
-						// defined arcs. In both cases, though, doing so results in
-						// some errors to be misclassified as evaluation error.
-						// c.AddBottom(b)
-						// return nil
 					}
-					c.undefinedFieldError(v, IncompleteError)
-					return nil, c.ci
+
+					hasCycleBreakingValue := s.hasFieldValue ||
+						!isCyclePlaceholder(arc.BaseValue)
+
+					if evaluating && !hasCycleBreakingValue {
+						err := c.Newf("cycle with field: %v", x)
+						b := &Bottom{Code: CycleError, Err: err}
+						c.AddBottom(b)
+						break
+					}
+
+					v := c.evaluate(arc, x, state)
+
+					return v, c.ci
 				}
 			}
 		}
